@@ -27,10 +27,10 @@
     <li class="goal {{ g.status }}" id="{{ g.id }}">
       <div class="goal-body">
         <p class="goal-text">
-          {% if g.origin == "agent" %}<span class="tag">Suggestion</span>{% else %}<span class="tag own">Your goal</span>{% endif %}
+          {% if g.origin == "agent" and g.status == "edited" %}<span class="tag own">Changed by you</span>{% elif g.origin == "agent" %}<span class="tag">Suggestion</span>{% else %}<span class="tag own">Your goal</span>{% endif %}
           {{ g.text }}
         </p>
-        {% if g.reason %}<p class="reason">Reason: {{ g.reason }}</p>{% endif %}
+        {% if g.reason %}<p class="reason">{% if g.status == "edited" %}Original reason{% else %}Reason{% endif %}: {{ g.reason }}</p>{% endif %}
         {% if g.original_text %}<p class="muted small">Changed from: {{ g.original_text }}</p>{% endif %}
       </div>
       <div class="goal-actions">

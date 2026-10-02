@@ -45,7 +45,7 @@ button, .button {
 }
 button:disabled { opacity: 0.6; cursor: wait; }
 button.secondary, .button.secondary { background: var(--surface); color: var(--accent); }
-button.link { background: none; border: none; color: var(--accent); padding: 0; text-decoration: underline; }
+button.link { background: none; border: none; color: var(--accent); padding: 10px 6px; text-decoration: underline; }
 #intake-submit { margin-top: 24px; padding: 11px 20px; }
 
 .notice { background: var(--warn-bg); border-radius: var(--radius); padding: 10px 14px; margin: 12px 0; }
@@ -84,3 +84,9 @@ form.inline { display: inline; }
   .goal-actions { flex-wrap: wrap; }
   .goal-edit, .goal-add { flex-wrap: wrap; }
 }
+
+.wait { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+@media (max-width: 560px) { .goal.removed { flex-direction: row; flex-wrap: wrap; } }

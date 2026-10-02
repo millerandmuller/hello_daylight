@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -81,8 +82,12 @@ def _run_proposal(page, description, user_goals):
         return None, "I read your project but could not write suggestions just now."
 
 
+_AUDIENCE_PREFIX = re.compile(r"^(it is|it's|it seems to be|this is)?\s*(probably|likely|mostly)?\s*(for|aimed at)\s+", re.I)
+
+
 def _apply_proposal(data: dict, proposal) -> None:
     data["card"] = proposal.project.model_dump()
+    data["card"]["audience"] = _AUDIENCE_PREFIX.sub("", data["card"]["audience"]).rstrip(".")
     data["proposal_error"] = None
     existing = {g["text"].lower() for g in data.get("goals", [])}
     for suggestion in proposal.goals:
@@ -120,6 +125,9 @@ async def intake_submit(
             fetch_error = "The page has almost no text I can read. It may only load with JavaScript."
     except fetcher.FetchError as exc:
         fetch_error = exc.reason
+    except Exception:  # never a bare 500 on the intake; ask for a sentence instead
+        log.exception("fetch crashed for %s", normalized)
+        fetch_error = "I could not read that page."
 
     if fetch_error and not description:
         # Edge case: unreadable project page. Ask for one sentence and keep going with it.
@@ -166,6 +174,9 @@ async def project_retry(request: Request, token: str):
         project = _store().get(token)
     except NotFound:
         return _not_found(request)
+    if not project.get("proposal_error"):
+        # Retry exists only for a failed suggestion run; it must not pile up new suggestions.
+        return RedirectResponse(f"/p/{token}", status_code=303)
     page = fetcher.PageSnapshot(**project["page"]) if project.get("page") else None
     user_goals = [g["text"] for g in ProjectStore.active_goals(project) if g["origin"] == "user"]
     proposal, error = await run_in_threadpool(_run_proposal, page, project.get("description"), user_goals)
@@ -213,13 +224,11 @@ def goal_action(request: Request, token: str, goal_id: str, action: str, text: s
     if action not in status_for:
         return _not_found(request)
     try:
-        if action == "restore":
-            current = _store().get(token)
-            if len(ProjectStore.active_goals(current)) >= MAX_GOALS:
-                return _goals_response(request, token, current, goal_error=f"{MAX_GOALS} goals is the limit. Remove one first.")
-        project = _store().set_goal_status(token, goal_id, status_for[action], text=text)
+        project = _store().set_goal_status(token, goal_id, status_for[action], text=text, restore=action == "restore")
     except NotFound:
         return _not_found(request)
+    except GoalLimit:
+        return _goals_response(request, token, _store().get(token), goal_error=f"{MAX_GOALS} goals is the limit. Remove one first.")
     return _goals_response(request, token, project)
 
 

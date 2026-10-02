@@ -3,6 +3,8 @@
 import ipaddress
 import re
 import socket
+import time
+import zlib
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
@@ -10,8 +12,9 @@ import httpx
 from bs4 import BeautifulSoup
 
 USER_AGENT = "HelloDaylight/0.1 (+https://github.com/millerandmuller/hello_daylight)"
-TIMEOUT = httpx.Timeout(8.0, connect=4.0)
-MAX_BYTES = 2_000_000
+TIMEOUT = httpx.Timeout(6.0, connect=4.0)
+TOTAL_BUDGET_S = 10.0  # whole fetch incl. redirects; keeps intake under 30 s with the model call
+MAX_BYTES = 1_000_000
 MAX_REDIRECTS = 5
 MAX_TEXT_CHARS = 8000
 
@@ -58,10 +61,17 @@ def normalize_url(raw: str) -> str:
         if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d)", url):
             raise FetchError("Only http and https links work here.")
         url = "https://" + url
-    parsed = urlparse(url)
+    if any(c in url for c in "\r\n\t "):
+        raise FetchError("That does not look like a web address.")
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        parsed.port  # raises on "example.com:abc"
+    except ValueError:
+        raise FetchError("That does not look like a web address.")
     if parsed.scheme not in ("http", "https"):
         raise FetchError("Only http and https links work here.")
-    if not parsed.hostname:
+    if not host or ".." in host or host.startswith(".") or any(len(label) > 63 for label in host.split(".")):
         raise FetchError("That does not look like a web address.")
     return url
 
@@ -72,6 +82,8 @@ def _check_public_host(url: str) -> None:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
         raise FetchError("I could not find that address.")
+    except (UnicodeError, ValueError):
+        raise FetchError("That does not look like a web address.")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0].split("%")[0])
         if not ip.is_global:
@@ -82,11 +94,22 @@ def fetch_page(raw_url: str, client: httpx.Client | None = None) -> PageSnapshot
     url = normalize_url(raw_url)
     own_client = client is None
     client = client or httpx.Client(
-        timeout=TIMEOUT, follow_redirects=False, headers={"User-Agent": USER_AGENT}
+        timeout=TIMEOUT,
+        follow_redirects=False,
+        trust_env=False,
+        # identity: read raw bytes, so a compressed bomb cannot expand past MAX_BYTES
+        headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"},
     )
+    deadline = time.monotonic() + TOTAL_BUDGET_S
+
+    def out_of_time() -> bool:
+        return time.monotonic() > deadline
+
     try:
         current = url
         for _ in range(MAX_REDIRECTS + 1):
+            if out_of_time():
+                raise FetchError("The page took too long to answer.")
             _check_public_host(current)
             try:
                 with client.stream("GET", current) as resp:
@@ -99,23 +122,41 @@ def fetch_page(raw_url: str, client: httpx.Client | None = None) -> PageSnapshot
                     if resp.status_code >= 400:
                         raise FetchError(f"The page answered with error {resp.status_code}.")
                     ctype = resp.headers.get("content-type", "")
-                    if "html" not in ctype and "text/plain" not in ctype:
+                    if ctype and "html" not in ctype and "text/plain" not in ctype:
                         raise FetchError("That link is not a web page I can read.")
                     body = bytearray()
-                    for chunk in resp.iter_bytes():
+                    for chunk in resp.iter_raw():
                         body.extend(chunk)
                         if len(body) > MAX_BYTES:
                             break
-                    html = body.decode(resp.encoding or "utf-8", errors="replace")
+                        if out_of_time():
+                            raise FetchError("The page took too long to answer.")
+                    raw = _decompress(bytes(body), resp.headers.get("content-encoding", ""))
+                    html = raw.decode(resp.encoding or "utf-8", errors="replace")
                     return extract(url, str(resp.url), html, resp.headers.get("last-modified"))
             except httpx.TimeoutException:
                 raise FetchError("The page took too long to answer.")
-            except httpx.HTTPError:
+            except (httpx.HTTPError, httpx.InvalidURL, httpx.StreamError):
                 raise FetchError("I could not reach that page.")
+            except (UnicodeError, ValueError):
+                raise FetchError("That does not look like a web address.")
         raise FetchError("The page redirected too many times.")
     finally:
         if own_client:
             client.close()
+
+
+def _decompress(body: bytes, encoding: str) -> bytes:
+    """Some servers compress even when asked not to. Expand at most MAX_BYTES."""
+    encoding = encoding.strip().lower()
+    if encoding in ("", "identity"):
+        return body
+    if encoding in ("gzip", "x-gzip", "deflate"):
+        try:
+            return zlib.decompressobj(zlib.MAX_WBITS | 32).decompress(body, MAX_BYTES)
+        except zlib.error:
+            pass
+    raise FetchError("I could not read that page's format.")
 
 
 def extract(url: str, final_url: str, html: str, last_modified: str | None = None) -> PageSnapshot:

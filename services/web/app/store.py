@@ -100,10 +100,14 @@ class ProjectStore:
 
         return self.update(token, mutate)
 
-    def set_goal_status(self, token: str, goal_id: str, status: str, text: str | None = None) -> dict:
+    def set_goal_status(self, token: str, goal_id: str, status: str, text: str | None = None, restore: bool = False) -> dict:
         def mutate(data):
             for goal in data.get("goals", []):
                 if goal["id"] == goal_id:
+                    if (goal["status"] == "removed") != restore:
+                        return  # only Undo brings a removed goal back; Undo only applies to removed goals
+                    if restore and len(self.active_goals(data)) >= MAX_GOALS:
+                        raise GoalLimit()
                     if status == "edited":
                         new_text = clean_goal(text or "")
                         if not new_text:

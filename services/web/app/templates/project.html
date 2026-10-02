@@ -13,7 +13,7 @@
   {% endif %}
   <p class="source">
     Read from <a href="{{ project.url }}" rel="noopener noreferrer" target="_blank">{{ project.url }}</a>
-    {% if project.fetch_error %}<br><span class="muted">The page was not readable ({{ project.fetch_error }}). I worked from your description.</span>{% endif %}
+    {% if project.fetch_error %}<br><span class="muted">The page was not readable ({{ project.fetch_error | trim(".") }}). I worked from your description.</span>{% endif %}
   </p>
 </article>
 
