@@ -8,7 +8,7 @@ You sign, you send. Nothing leaves this app on its own.
 
 Early build. What's real right now:
 
-- [ ] Project intake (paste a URL, get a project card + suggested goals)
+- [x] Project intake: paste a URL, get a project card and suggested goals, each with a reason. Keep, change or remove any of them and add your own. Works locally; not deployed yet.
 - [ ] Nightly agent crew (visible task stream, hire/fire on weak results)
 - [ ] Morning desk (question + resonance cards, sign/edit/thumbs)
 - [ ] Spoken morning briefing
@@ -23,13 +23,20 @@ Nothing is deployed publicly yet. This README will say exactly what's real and w
 
 ## Running locally
 
+Python 3.11.
+
 ```bash
-cd services/web
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+python3.11 -m venv .venv
+.venv/bin/pip install -r services/web/requirements-dev.txt
+cp .env.example .env   # add your Gemini API key
+.venv/bin/uvicorn app.main:app --app-dir services/web --reload
 ```
 
-`GET /status` returns a health check.
+Open http://localhost:8000 and paste a project link. `GET /status` returns a health check.
+
+Tests: `.venv/bin/python -m pytest services/web/tests`
+
+Projects are stored as JSON files under `.data/` for now (gitignored).
 
 ## License
 

@@ -1,0 +1,73 @@
+<section id="goals" class="goals">
+  <h2>Goals</h2>
+  <p class="hint">Keep, change or remove any suggestion, and add your own. Empty is fine: then the planner decides and explains why.</p>
+
+  {% if goal_error %}<p class="notice error" role="alert">{{ goal_error }}</p>{% endif %}
+
+  <ul class="goal-list">
+  {% for g in goals %}
+    {% if g.status == "removed" %}
+    <li class="goal removed" id="{{ g.id }}">
+      <span class="goal-text">{{ g.text }}</span>
+      <span class="muted">Removed.</span>
+      <form method="post" action="/p/{{ project.id }}/goals/{{ g.id }}/restore" hx-post="/p/{{ project.id }}/goals/{{ g.id }}/restore" hx-target="#goals" hx-swap="outerHTML" class="inline">
+        <button type="submit" class="link">Undo</button>
+      </form>
+    </li>
+    {% elif editing == g.id %}
+    <li class="goal editing" id="{{ g.id }}">
+      <form method="post" action="/p/{{ project.id }}/goals/{{ g.id }}/edit" hx-post="/p/{{ project.id }}/goals/{{ g.id }}/edit" hx-target="#goals" hx-swap="outerHTML" class="goal-edit">
+        <label class="visually-hidden" for="edit-{{ g.id }}">Change goal</label>
+        <input id="edit-{{ g.id }}" name="text" value="{{ g.text }}" maxlength="200" required autofocus>
+        <button type="submit">Save</button>
+        <a href="/p/{{ project.id }}" hx-get="/p/{{ project.id }}/goals/__none__/edit" hx-target="#goals" hx-swap="outerHTML" class="link">Cancel</a>
+      </form>
+    </li>
+    {% else %}
+    <li class="goal {{ g.status }}" id="{{ g.id }}">
+      <div class="goal-body">
+        <p class="goal-text">
+          {% if g.origin == "agent" %}<span class="tag">Suggestion</span>{% else %}<span class="tag own">Your goal</span>{% endif %}
+          {{ g.text }}
+        </p>
+        {% if g.reason %}<p class="reason">Reason: {{ g.reason }}</p>{% endif %}
+        {% if g.original_text %}<p class="muted small">Changed from: {{ g.original_text }}</p>{% endif %}
+      </div>
+      <div class="goal-actions">
+        {% if g.status == "proposed" %}
+        <form method="post" action="/p/{{ project.id }}/goals/{{ g.id }}/accept" hx-post="/p/{{ project.id }}/goals/{{ g.id }}/accept" hx-target="#goals" hx-swap="outerHTML" class="inline">
+          <button type="submit">Keep</button>
+        </form>
+        {% else %}
+        <span class="kept" aria-label="kept">Kept</span>
+        {% endif %}
+        <a class="button secondary" href="/p/{{ project.id }}/goals/{{ g.id }}/edit" hx-get="/p/{{ project.id }}/goals/{{ g.id }}/edit" hx-target="#goals" hx-swap="outerHTML">Change</a>
+        <form method="post" action="/p/{{ project.id }}/goals/{{ g.id }}/remove" hx-post="/p/{{ project.id }}/goals/{{ g.id }}/remove" hx-target="#goals" hx-swap="outerHTML" class="inline">
+          <button type="submit" class="secondary">Remove</button>
+        </form>
+      </div>
+    </li>
+    {% endif %}
+  {% endfor %}
+  </ul>
+
+  {% if active_count < max_goals %}
+  <form method="post" action="/p/{{ project.id }}/goals" hx-post="/p/{{ project.id }}/goals" hx-target="#goals" hx-swap="outerHTML" class="goal-add">
+    <label for="new-goal" class="visually-hidden">Add a goal</label>
+    <input id="new-goal" name="text" maxlength="200" placeholder="Beta testers in the DACH region" required>
+    <button type="submit" class="secondary">Add goal</button>
+  </form>
+  {% endif %}
+
+  <div class="confirm">
+    {% if confirm_state == "current" %}
+      <p class="confirmed">Confirmed. Tonight's crew works on {% if active_count %}these {{ active_count }} goal{{ "s" if active_count != 1 }}{% else %}goals the planner picks and explains{% endif %}.</p>
+    {% else %}
+      {% if confirm_state == "stale" %}<p class="notice">You changed the goals since confirming.</p>{% endif %}
+      <form method="post" action="/p/{{ project.id }}/confirm" hx-post="/p/{{ project.id }}/confirm" hx-target="#goals" hx-swap="outerHTML">
+        <button type="submit">{% if active_count %}Confirm {{ active_count }} goal{{ "s" if active_count != 1 }}{% else %}Confirm: let the planner decide{% endif %}</button>
+      </form>
+      <p class="hint">Confirming keeps every goal still on the list.</p>
+    {% endif %}
+  </div>
+</section>

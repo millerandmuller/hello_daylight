@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ project.card.name }} · Hello Daylight{% endblock %}
+{% block content %}
+<article class="card project-card">
+  <p class="eyebrow">Your project</p>
+  <h1>{{ project.card.name }}</h1>
+  {% if project.card.one_liner %}<p class="lede">{{ project.card.one_liner }}</p>{% endif %}
+  {% if project.card.audience %}<p><span class="label">Probably for</span> {{ project.card.audience }}</p>{% endif %}
+  {% if project.card.observations %}
+  <ul class="observations">
+    {% for o in project.card.observations %}<li>{{ o }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p class="source">
+    Read from <a href="{{ project.url }}" rel="noopener noreferrer" target="_blank">{{ project.url }}</a>
+    {% if project.fetch_error %}<br><span class="muted">The page was not readable ({{ project.fetch_error }}). I worked from your description.</span>{% endif %}
+  </p>
+</article>
+
+{% if project.proposal_error %}
+<div class="notice error" role="alert">
+  {{ project.proposal_error }} Your own goals are saved.
+  <form method="post" action="/p/{{ project.id }}/propose" class="inline">
+    <button type="submit">Try again</button>
+  </form>
+</div>
+{% endif %}
+
+{% include "_goals.html" %}
+
+<p class="muted small">This link is private to you. Keep it; it is the only way back to this project.</p>
+{% endblock %}
