@@ -1,9 +1,9 @@
 """Reads a public project page. Refuses anything that is not a public web address."""
 
+import asyncio
 import ipaddress
 import re
 import socket
-import time
 import zlib
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 
 USER_AGENT = "HelloDaylight/0.1 (+https://github.com/millerandmuller/hello_daylight)"
 TIMEOUT = httpx.Timeout(6.0, connect=4.0)
-TOTAL_BUDGET_S = 10.0  # whole fetch incl. redirects; keeps intake under 30 s with the model call
+TOTAL_BUDGET_S = 10.0  # hard cap on the whole fetch; + 12 s model timeout keeps intake under 30 s
 MAX_BYTES = 1_000_000
 MAX_REDIRECTS = 5
 MAX_TEXT_CHARS = 8000
@@ -61,8 +61,9 @@ def normalize_url(raw: str) -> str:
         if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d)", url):
             raise FetchError("Only http and https links work here.")
         url = "https://" + url
-    if any(c in url for c in "\r\n\t "):
+    if any(c in url for c in "\r\n\t"):
         raise FetchError("That does not look like a web address.")
+    url = url.replace(" ", "%20")  # a pasted path with a space is still a valid link
     try:
         parsed = urlparse(url)
         host = parsed.hostname
@@ -76,10 +77,10 @@ def normalize_url(raw: str) -> str:
     return url
 
 
-def _check_public_host(url: str) -> None:
+async def _check_public_host(url: str) -> None:
     host = urlparse(url).hostname or ""
     try:
-        infos = socket.getaddrinfo(host, None)
+        infos = await asyncio.get_running_loop().getaddrinfo(host, None)
     except socket.gaierror:
         raise FetchError("I could not find that address.")
     except (UnicodeError, ValueError):
@@ -90,29 +91,37 @@ def _check_public_host(url: str) -> None:
             raise FetchError("That address is not a public website.")
 
 
-def fetch_page(raw_url: str, client: httpx.Client | None = None) -> PageSnapshot:
+async def fetch_page_async(raw_url: str) -> PageSnapshot:
+    """Hard deadline over everything: DNS, connect, headers, body, every redirect hop.
+
+    Per-read timeouts alone do not bound a server that drips one byte at a time;
+    the outer wait_for cancels the request wherever it is stuck and closes the socket.
+    """
     url = normalize_url(raw_url)
-    own_client = client is None
-    client = client or httpx.Client(
+    try:
+        return await asyncio.wait_for(_fetch(url), timeout=TOTAL_BUDGET_S)
+    except (asyncio.TimeoutError, TimeoutError):
+        raise FetchError("The page took too long to answer.")
+
+
+def fetch_page(raw_url: str) -> PageSnapshot:
+    """Sync entry point for scripts and tests."""
+    return asyncio.run(fetch_page_async(raw_url))
+
+
+async def _fetch(url: str) -> PageSnapshot:
+    async with httpx.AsyncClient(
         timeout=TIMEOUT,
         follow_redirects=False,
         trust_env=False,
         # identity: read raw bytes, so a compressed bomb cannot expand past MAX_BYTES
         headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"},
-    )
-    deadline = time.monotonic() + TOTAL_BUDGET_S
-
-    def out_of_time() -> bool:
-        return time.monotonic() > deadline
-
-    try:
+    ) as client:
         current = url
         for _ in range(MAX_REDIRECTS + 1):
-            if out_of_time():
-                raise FetchError("The page took too long to answer.")
-            _check_public_host(current)
+            await _check_public_host(current)
             try:
-                with client.stream("GET", current) as resp:
+                async with client.stream("GET", current) as resp:
                     if resp.is_redirect:
                         location = resp.headers.get("location")
                         if not location:
@@ -125,15 +134,13 @@ def fetch_page(raw_url: str, client: httpx.Client | None = None) -> PageSnapshot
                     if ctype and "html" not in ctype and "text/plain" not in ctype:
                         raise FetchError("That link is not a web page I can read.")
                     body = bytearray()
-                    for chunk in resp.iter_raw():
+                    async for chunk in resp.aiter_raw():
                         body.extend(chunk)
                         if len(body) > MAX_BYTES:
                             break
-                        if out_of_time():
-                            raise FetchError("The page took too long to answer.")
                     raw = _decompress(bytes(body), resp.headers.get("content-encoding", ""))
                     html = raw.decode(resp.encoding or "utf-8", errors="replace")
-                    return extract(url, str(resp.url), html, resp.headers.get("last-modified"))
+                    return await asyncio.to_thread(extract, url, str(resp.url), html, resp.headers.get("last-modified"))
             except httpx.TimeoutException:
                 raise FetchError("The page took too long to answer.")
             except (httpx.HTTPError, httpx.InvalidURL, httpx.StreamError):
@@ -141,9 +148,6 @@ def fetch_page(raw_url: str, client: httpx.Client | None = None) -> PageSnapshot
             except (UnicodeError, ValueError):
                 raise FetchError("That does not look like a web address.")
         raise FetchError("The page redirected too many times.")
-    finally:
-        if own_client:
-            client.close()
 
 
 def _decompress(body: bytes, encoding: str) -> bytes:

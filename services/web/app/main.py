@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 import logging
 import re
 from pathlib import Path
@@ -20,7 +22,7 @@ templates = Jinja2Templates(directory=HERE / "templates")
 
 # Swappable in tests.
 app.state.store = ProjectStore(config.DATA_DIR / "projects")
-app.state.fetch_page = fetcher.fetch_page
+app.state.fetch_page = fetcher.fetch_page_async
 app.state.propose = proposer.propose
 
 MAX_DESCRIPTION_CHARS = 1000
@@ -85,6 +87,19 @@ def _run_proposal(page, description, user_goals):
 _AUDIENCE_PREFIX = re.compile(r"^(it is|it's|it seems to be|this is)?\s*(probably|likely|mostly)?\s*(for|aimed at)\s+", re.I)
 
 
+PROPOSAL_BUDGET_S = 14.0  # model timeout is 12 s; this also caps SDK-internal retries
+
+
+async def _propose_within_budget(page, description, user_goals):
+    try:
+        return await asyncio.wait_for(
+            run_in_threadpool(_run_proposal, page, description, user_goals), timeout=PROPOSAL_BUDGET_S
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        log.warning("proposal exceeded %ss", PROPOSAL_BUDGET_S)
+        return None, "I read your project but could not write suggestions just now."
+
+
 def _apply_proposal(data: dict, proposal) -> None:
     data["card"] = proposal.project.model_dump()
     data["card"]["audience"] = _AUDIENCE_PREFIX.sub("", data["card"]["audience"]).rstrip(".")
@@ -120,7 +135,9 @@ async def intake_submit(
 
     page, fetch_error = None, None
     try:
-        page = await run_in_threadpool(app.state.fetch_page, normalized)
+        page = app.state.fetch_page(normalized)
+        if inspect.isawaitable(page):
+            page = await page
         if not fetcher.is_readable(page):
             fetch_error = "The page has almost no text I can read. It may only load with JavaScript."
     except fetcher.FetchError as exc:
@@ -138,7 +155,7 @@ async def intake_submit(
             status_code=422,
         )
 
-    proposal, proposal_error = await run_in_threadpool(_run_proposal, page, description or None, user_goals)
+    proposal, proposal_error = await _propose_within_budget(page, description or None, user_goals)
 
     data = {
         "url": normalized,
@@ -179,7 +196,7 @@ async def project_retry(request: Request, token: str):
         return RedirectResponse(f"/p/{token}", status_code=303)
     page = fetcher.PageSnapshot(**project["page"]) if project.get("page") else None
     user_goals = [g["text"] for g in ProjectStore.active_goals(project) if g["origin"] == "user"]
-    proposal, error = await run_in_threadpool(_run_proposal, page, project.get("description"), user_goals)
+    proposal, error = await _propose_within_budget(page, project.get("description"), user_goals)
 
     def mutate(data):
         if proposal:
