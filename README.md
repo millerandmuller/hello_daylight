@@ -7,15 +7,18 @@ Give it the link to your project in the evening. A lead agent hires its own smal
 
 Hello Daylight writes. You send. Nothing leaves this app: the only exits are the clipboard and your inbox page.
 
+**Live:** <https://daylight-web-195728900690.europe-west3.run.app> — try it with your own Gemini key on `/try`, no account needed. Signed-in workspaces are invite-only.
+
 ## Status (honest)
 
 | Part | State |
 |---|---|
-| Intake, nightly crew, checks, morning desk, crew view, ledger, caps, resume | built and exercised against the real Gemini API from a laptop |
-| Public mode (`/try`, your own key, nothing stored on the server) | built and exercised from a laptop |
-| Sign-in (Google through Firebase), allowlist, admin page | built; the Google sign-in itself has **not** been run against a live Firebase project yet (tests use a development login) |
-| Firestore storage | built; tested against an in-memory stand-in, **not** yet against a live Firestore |
-| Cloud deployment (`deploy/deploy.sh`) | written, **not** run yet. There is no public URL |
+| Intake, nightly crew, checks, morning desk, crew view, ledger, caps, resume | built, running on Cloud Run against the real Gemini API |
+| Public mode (`/try`, your own key, nothing stored on the server) | built and live |
+| Sign-in (Google through Firebase), allowlist, admin page | built and live; Google sign-in checked on the deployed service |
+| Firestore storage | built and live; full nights, a double start and an abort with resume checked against the real database |
+| Cloud deployment | live since 2026-10-04 (web service, nightly job, scheduler at 23:00 America/Toronto). `deploy/deploy.sh` does not yet carry the optional `GITHUB_TOKEN` secret or more than one operator address; add them by hand until it does |
+| Scheduled nights | the schedule is live; the first real nights for a real workspace are still ahead |
 | Spoken briefing, placement and image suggestions, long-term memory | not built |
 
 There is no curated example data: every result you see comes from a real run.
@@ -76,7 +79,7 @@ Commands: `python -m app.night --project <id> [--budget 0.05]` starts a run; `py
 
 ## Verified how
 
-The test suite runs without network. Firestore is checked against an in-memory stand-in because the emulator needs Java; Google sign-in is checked with a development login. Both need a first run against a real project, which is the first step of deployment.
+The test suite runs without network: Firestore is checked against an in-memory stand-in and sign-in with a development login. On top of that the deployed service was checked against the real project: Google sign-in, Firestore, a scheduled start, a double start on the job (one paid run, the rest refused), an abort with resume, the budget stop, and that a user's own key never reaches a log or the database.
 
 ## License
 
