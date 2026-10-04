@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, ValidationError
 
-from . import auth, config, fetcher, intake, keycheck, launcher, logsafe, proposer, service
+from . import auth, cards as cardtext, config, fetcher, intake, keycheck, launcher, logsafe, proposer, service
 from .engine import ProjectInput
 from .repo import NotFound, now, open_repo, parse_ts
 from .store import MAX_GOALS, GoalLimit, ProjectStore
@@ -25,6 +25,7 @@ auth.assert_safe_config()
 app = FastAPI(title="Hello Daylight", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
+templates.env.globals.update(age_label=cardtext.age_label, replies_label=cardtext.replies_label)
 
 # Swappable in tests.
 app.state.repo = open_repo()
@@ -405,7 +406,7 @@ def _card_of(project: dict, card_id: str) -> tuple[dict, dict]:
 @app.post("/p/{token}/cards/{card_id}/{action}", response_class=HTMLResponse)
 def card_action(request: Request, token: str, card_id: str, action: str, text: str = Form(""), comment: str = Form("")):
     user = user_of(request)
-    if action not in ("sign", "unsign", "edit", "up", "down"):
+    if action not in ("sign", "unsign", "edit", "up", "down", "addlink", "removelink"):
         return _not_found(request)
     try:
         project = _own(token, user)
@@ -427,6 +428,10 @@ def card_action(request: Request, token: str, card_id: str, action: str, text: s
                 c["draft"], c["edited"] = text, True
             elif action in ("up", "down"):
                 c["thumb"], c["comment"] = action, comment
+            elif action == "addlink" and c.get("link_sentence") and not c.get("link_added"):
+                c["draft"], c["link_added"] = cardtext.add_link(c["draft"], c["link_sentence"]), True  # the owner's click, a fixed sentence
+            elif action == "removelink" and c.get("link_added"):
+                c["draft"], c["link_added"] = cardtext.remove_link(c["draft"], c["link_sentence"]), False
 
     repo().mutate_run(run["run_id"], mutate)
     if action == "edit" and text and text != card["draft"]:

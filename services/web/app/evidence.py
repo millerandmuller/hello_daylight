@@ -111,6 +111,7 @@ class EvidenceItem:
     author_url: str | None = None
     links: list[str] = field(default_factory=list)
     suspicious: list[str] = field(default_factory=list)  # phrases that look like instructions to a model
+    replies: int | None = None  # the number of replies the SOURCE reports (Hacker News stories); None when it reports none
 
 
 class Evidence:
@@ -130,6 +131,8 @@ class Evidence:
             if not existing.date and item.date:
                 existing.date, existing.date_basis = item.date, item.date_basis
             existing.author = existing.author or item.author
+            if existing.replies is None:
+                existing.replies = item.replies
             existing.author_url = existing.author_url or item.author_url
             if item.links:
                 existing.links = item.links

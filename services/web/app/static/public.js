@@ -205,6 +205,10 @@
     }
     save();
   }
+  function ageText(c) {
+    if (typeof c.age_days !== "number") return "";
+    return " · " + (c.age_days === 0 ? "today" : c.age_days === 1 ? "1 day old" : c.age_days + " days old") + (c.date_basis === "markup" ? " (date from page markup)" : "");
+  }
   function renderCards() {
     var box = $("results"); clear(box);
     if (state.headline) box.appendChild(el("p", { class: "notice", role: "status", text: state.headline }));
@@ -212,10 +216,11 @@
       var art = el("article", { class: "opening " + c.kind, id: c.id });
       art.appendChild(el("p", { class: "eyebrow", text: c.kind === "question" ? "A question you can answer" : "A writer who covers your topic" }));
       art.appendChild(el("h2", {}, link(c.url, c.title)));
-      art.appendChild(el("p", { class: "meta muted small" }, (c.date || "") + (c.date_basis === "text" ? " (date found in the page text)" : "") + (c.author ? " · " + c.author : "") + " · ", link(c.url, "Open source")));
+      art.appendChild(el("p", { class: "meta muted small" }, (c.date || "") + (c.date_basis === "text" ? " (date found in the page text)" : "") + ageText(c) + (typeof c.replies === "number" ? " · " + c.replies + (c.replies === 1 ? " reply" : " replies") : "") + (c.author ? " · " + c.author : "") + " · ", link(c.url, "Open source")));
       art.appendChild(el("p", { class: "why", text: c.why }));
       art.appendChild(el("blockquote", { text: c.quote }));
-      if (c.kind === "resonance") art.appendChild(c.contact_route ? el("p", { class: "small" }, el("span", { class: "label", text: "Contact route from their own page: " }), c.contact_route + " ", link(c.contact_source_url, "where it is shown")) : el("p", { class: "small muted", text: "Their page shows no contact route. Use the source link." }));
+      if (c.kind === "resonance" && c.contact_route) art.appendChild(el("p", { class: "small" }, el("span", { class: "label", text: "Contact route from their own page: " }), c.contact_route + " ", link(c.contact_source_url, "where it is shown")));
+      if (c.route_words) art.appendChild(el("p", { class: "small route" }, c.route_words + (c.route_url ? " " : ""), c.route_url ? link(c.route_url, c.route_url) : null, c.route_url ? "." : ""));
       if (c.needs_attention && c.needs_attention.length) art.appendChild(el("p", { class: "notice small", text: "This draft needs a look: " + c.needs_attention.join("; ") + "." }));
       var draft = el("pre", { class: "draft", text: c.draft }); art.appendChild(el("span", { class: "label", text: "Draft" })); art.appendChild(draft);
       var acts = el("div", { class: "card-actions" });
@@ -225,6 +230,14 @@
         acts.appendChild(el("button", { type: "button", class: "link", text: "Undo", onclick: function () { c.state = "new"; state.inbox = state.inbox.filter(function (i) { return i.url !== c.url; }); save(); renderCards(); } }));
       } else {
         acts.appendChild(el("button", { type: "button", text: "Sign and copy", onclick: function () { copyText(c.draft); c.state = "signed"; c.signed_at = new Date().toISOString(); state.inbox = state.inbox.filter(function (i) { return i.url !== c.url; }).concat([c]); save(); renderCards(); } }));
+      }
+      if (c.link_sentence) {
+        art.appendChild(el("p", { class: "small" }, el("button", { type: "button", class: "secondary", text: c.link_added ? "Remove link to my project" : "Add link to my project", onclick: function () {
+          var s = "\n\n" + c.link_sentence;
+          if (c.link_added) { c.draft = c.draft.split(s).join("").split(c.link_sentence).join("").replace(/\s+$/, ""); c.link_added = false; }
+          else if (c.draft.indexOf(c.link_sentence) < 0) { c.draft = c.draft.replace(/\s+$/, "") + s; c.link_added = true; }
+          save(); renderCards();
+        } }), c.link_added ? "" : " This reply answers the question only. The link is your call."));
       }
       art.appendChild(acts);
       var ta = el("textarea", { rows: "9", maxlength: "2000" }); ta.value = c.draft;

@@ -4,18 +4,23 @@
   <article class="opening {{ c.kind }}" id="{{ c.id }}">
     <p class="eyebrow">{% if c.kind == "question" %}A question you can answer{% else %}A writer who covers your topic{% endif %}</p>
     <h2><a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">{{ c.title }}</a></h2>
-    <p class="meta muted small">{{ c.date }}{% if c.date_basis == "text" %} (date found in the page text){% endif %}{% if c.author %} · {{ c.author }}{% endif %} · <a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">Open source</a></p>
+    <p class="meta muted small">{{ c.date }}{% if c.date_basis == "text" %} (date found in the page text){% endif %}{% if age_label(c.age_days, c.date_basis) %} · {{ age_label(c.age_days, c.date_basis) }}{% endif %}{% if replies_label(c.replies) %} · {{ replies_label(c.replies) }}{% endif %}{% if c.author %} · {{ c.author }}{% endif %} · <a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">Open source</a></p>
     <p class="why">{{ c.why }}</p>
     <blockquote>{{ c.quote }}</blockquote>
     {% if c.kind == "resonance" %}
       {% if c.contact_route %}<p class="small"><span class="label">Contact route from their own page:</span> {{ c.contact_route }}
-        <a href="{{ c.contact_source_url }}" rel="noopener noreferrer" target="_blank">where it is shown</a></p>
-      {% else %}<p class="small muted">Their page shows no contact route. Use the source link.</p>{% endif %}
+        <a href="{{ c.contact_source_url }}" rel="noopener noreferrer" target="_blank">where it is shown</a></p>{% endif %}
     {% endif %}
+    {% if c.route_words %}<p class="small route">{{ c.route_words }}{% if c.route_url %} <a href="{{ c.route_url }}" rel="noopener noreferrer" target="_blank">{{ c.route_url }}</a>.{% endif %}</p>{% endif %}
     {% if c.needs_attention %}<p class="notice small">This draft needs a look: {{ c.needs_attention | join("; ") }}.</p>{% endif %}
 
     <label class="label" for="draft-{{ c.id }}">Draft</label>
     <pre class="draft" id="draft-{{ c.id }}">{{ c.draft }}</pre>
+
+    {% if c.link_sentence %}<form method="post" class="inline" action="/p/{{ project.id }}/cards/{{ c.id }}/{{ 'removelink' if c.link_added else 'addlink' }}" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/{{ 'removelink' if c.link_added else 'addlink' }}" hx-target="#cards" hx-swap="outerHTML">
+      <button type="submit" class="secondary">{% if c.link_added %}Remove link to my project{% else %}Add link to my project{% endif %}</button>
+      {% if not c.link_added %}<span class="muted small">This reply answers the question only. The link is your call.</span>{% endif %}
+    </form>{% endif %}
 
     <div class="card-actions">
       {% if c.state == "signed" %}

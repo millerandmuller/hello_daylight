@@ -130,6 +130,7 @@ async def verify_finding(finding: Finding, kind: str, evidence: Evidence, vc: Ve
             "date": ev.date,
             "date_basis": ev.date_basis,
             "source": ev.source,
+            "replies": ev.replies,
             "kind": kind,
             "why": finding.why.strip(),
             "quote": finding.quote.strip(),

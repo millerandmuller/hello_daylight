@@ -108,6 +108,7 @@ def make_tools(ctx: ToolContext) -> list[Callable]:
                     source="hn",
                     text=text,
                     author=hit.get("author") or "",
+                    replies=hit["num_comments"] if type(hit.get("num_comments")) is int and hit["num_comments"] >= 0 else None,
                 )
             )
             out.append(_present(ctx, item))

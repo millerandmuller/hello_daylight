@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
+from . import cards as cardtext
 from . import config, prompts
 from .evidence import Evidence, canonical_url, domain_of, untrusted_block
 from .llm import CallFailed, ModelGateway
@@ -31,6 +32,8 @@ HEARTBEAT_S = 8.0
 SPEND_CHECK_S = 1.0  # money spent since the last checkpoint is saved within a second, so a hard kill loses (almost) none of it
 MAX_RESUMES = 3  # a run that failed for an infrastructure reason may be resumed this often, then it stays failed
 WEAK_SCORE = 4
+# first labels of hosts many projects share: they say nothing about the project's own name
+GENERIC_HOSTS = {"github", "gitlab", "vercel", "netlify", "pages", "app", "web", "www", "run", "herokuapp", "notion", "substack", "medium", "dev", "io", "com", "org", "net", "site"}
 RELEVANCE_FLOOR = 6  # a curated pick below this does not become a card: fewer cards with a reason beat an embarrassing one
 
 
@@ -57,6 +60,8 @@ class ProjectInput:
 
     def names(self) -> list[str]:
         host = domain_of(self.url).split(".")[0] if self.url else ""
+        if host in GENERIC_HOSTS:  # a project that lives on a shared host is not called after the host
+            host = ""
         return [n for n in {self.name, self.name.split(":")[0].split(" - ")[0].strip(), host} if n]
 
 
@@ -546,7 +551,8 @@ class NightRun:
             score = (t.get("evaluation") or {}).get("score", 5)
             for it in t["items"]:
                 items.append(dict(it, _score=score - (3 if it.get("weak") else 0)))
-        items.sort(key=lambda i: (-i["_score"], i["date"] or ""), reverse=False)
+        items.sort(key=lambda i: i["date"] or "", reverse=True)  # at an equal score the younger thread comes first (stable sort)
+        items.sort(key=lambda i: -i["_score"])
         for n, it in enumerate(items, 1):
             it["item_id"] = f"c{n}"
         return items
@@ -566,11 +572,13 @@ class NightRun:
         curated = False
         # the curator judges relevance even when there are only a few findings: passing the checks is not a fit
         instruction = prompts.CURATE_INSTRUCTION.format(n=c.max_cards, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
-        listing = "\n".join(f"{i['item_id']} [{i['kind']}] {i['title'][:90]} | {i['source']} | {i['date']} | author: {i['author'] or '-'} | {i['why'][:140]}" for i in items)
+        listing = "\n".join(f"{i['item_id']} [{i['kind']}] {' '.join(i['title'].split())[:90]} | {i['source']} | {i['date']} | {self._age_and_replies(i)} | author: {i['author'] or '-'} | {i['why'][:140]}" for i in items)
         user = f"{self._project_text()}\n\nFeedback:\n{self._feedback_text()}\n\nVerified findings:\n{untrusted_block('FINDINGS', listing)}"
         try:
             res = await self.gateway.run_agent(step="curate", tier="mid", name="curator", instruction=instruction, user_text=user, output_schema=Curation, deadline_s=120, max_model_calls=2)
             valid = [p for p in res.parsed.picks if p.item_id in by_id]
+            # equal relevance: the younger thread first. The sort is stable, so the curator's own order decides everything else.
+            valid.sort(key=lambda p: (-p.relevance, self._age_of(by_id[p.item_id])))
             low = [p for p in valid if p.relevance < RELEVANCE_FLOOR]
             picks = [p.item_id for p in valid if p.relevance >= RELEVANCE_FLOOR]
             curated = True
@@ -583,6 +591,17 @@ class NightRun:
         picks = self._enforce_picks(picks, items, c.max_cards, fill=not curated)
         self.S["picks"] = [by_id[i] for i in picks]
         await self._checkpoint()
+
+    def _age_of(self, item: dict) -> int:
+        age = cardtext.age_days(item.get("date"), self.today)
+        return age if age is not None else 10_000
+
+    def _age_and_replies(self, item: dict) -> str:
+        age = cardtext.age_days(item.get("date"), self.today)
+        parts = [f"age: {age} days" if age is not None else "age: unknown"]
+        if item.get("replies") is not None:
+            parts.append(f"replies: {item['replies']}")
+        return " | ".join(parts)
 
     @staticmethod
     def _enforce_picks(picks: list[str], items: list[dict], n: int, fill: bool = True) -> list[str]:
@@ -622,6 +641,7 @@ class NightRun:
         done_urls = {c["url"] for c in self.S["cards"]}
         todo = [p for p in picks if p["url"] not in done_urls]
         self.S["stage"] = "write"
+        self._drafts = {c["id"]: c["draft"] for c in self.S["cards"]}  # newest draft per card id, for the closing check
         sem = asyncio.Semaphore(3)
 
         async def one(item: dict):
@@ -640,9 +660,15 @@ class NightRun:
     async def _write_card(self, item: dict) -> dict:
         c = self.contract
         rank = (self.S["picks"] or []).index(item) if item in (self.S["picks"] or []) else 99
+        card_id = f"k{rank + 1}"
         kind = item["kind"]
-        tmpl = prompts.WRITE_QUESTION if kind == "question" else prompts.WRITE_RESONANCE
-        writer_instr = tmpl.format(project=self.p.name, url=self.p.url or "", voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
+        # A reply in a stranger's issue answers the question and carries no project; the owner adds the link with one click.
+        plain = kind == "question" and item["source"] == "github"
+        if plain:
+            writer_instr = prompts.WRITE_QUESTION_PLAIN.format(voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
+        else:
+            tmpl = prompts.WRITE_QUESTION if kind == "question" else prompts.WRITE_RESONANCE
+            writer_instr = tmpl.format(project=self.p.name, url=self.p.url or "", pitch=prompts.PITCH_RULE, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
         source = (
             f"Source: {item['title']} ({item['url']}), written {item['date']}"
             f"{', by ' + item['author'] if item['author'] else ''}.\nQuote: {item['quote']}\nWhy it fits: {item['why']}\nPage facts:\n"
@@ -657,7 +683,7 @@ class NightRun:
             res = await self.gateway.run_agent(step="write", tier="mid", name=f"writer_{kind}", instruction=writer_instr, user_text=ask, output_schema=Draft, deadline_s=90, max_model_calls=2)
             draft = res.parsed.text.strip()
             original = original or draft
-            lint = prompts.lint_draft(draft, names)
+            lint = self._lint(draft, names, plain, card_id)
             if lint and round_no < c.max_rounds_write:
                 problems = lint  # a mechanical failure needs no editor
                 continue
@@ -668,21 +694,31 @@ class NightRun:
                 break
             problems = (cres.parsed.problems or []) + lint
         draft = prompts.mechanical_fix(draft)
-        left = prompts.lint_draft(draft, names)
+        if plain:  # the last word is code: whatever the model did, this reply carries no project
+            draft = cardtext.strip_project(draft, names, self.p.url) or draft
+        left = self._lint(draft, names, plain, card_id)
+        self._drafts[card_id] = draft
+        route_words, route_url = cardtext.route_text({"kind": kind, "source": item["source"], "contact_route": item["contact_route"], "url": item["url"]})
         return {
-            "id": f"k{rank + 1}",
+            "id": card_id,
             "rank": rank,
             "kind": kind,
             "title": item["title"],
             "url": item["url"],
             "date": item["date"],
             "date_basis": item.get("date_basis", "api"),
+            "age_days": cardtext.age_days(item["date"], self.today),
+            "replies": item.get("replies") if item["source"] == "hn" else None,
             "source": item["source"],
             "author": item["author"],
             "quote": item["quote"],
             "why": item["why"],
             "contact_route": item["contact_route"],
             "contact_source_url": item["contact_source_url"],
+            "route_words": route_words,
+            "route_url": route_url,
+            "link_sentence": cardtext.link_sentence(self.p.name, self.p.url) if plain and self.p.url else None,
+            "link_added": False,
             "draft": draft,
             "original_draft": original,
             "needs_attention": left,
@@ -691,6 +727,16 @@ class NightRun:
             "comment": "",
             "task_id": item.get("task_id"),
         }
+
+    def _lint(self, draft: str, names: list[str], plain: bool, card_id: str) -> list[str]:
+        """The rule-based problems of a draft, in the same place for every round: style, project mentions and a closing
+        that repeats another card's of this night."""
+        problems = prompts.lint_draft(draft, names, project_allowed=not plain, project_url=self.p.url or "")
+        self._drafts[card_id] = draft  # the other cards of this night compare against the newest version
+        other = cardtext.same_closing_as(card_id, draft, {k: v for k, v in self._drafts.items() if k != card_id})
+        if other:
+            problems.append(f'{cardtext.closing_hint(other)} ("{cardtext.closing_paragraph(self._drafts[other])[:120]}"): write a different closing that fits this source')
+        return problems
 
     # ------------------------------------------------------------------------------------------
     # N8: close the run, ledger line, release
@@ -821,6 +867,9 @@ class NightRun:
         if missing:
             parts.append(f"{missing} scout(s) did not finish")
         found = len(self._all_items())
+        unchosen = found - n - int(self.S.get("off_topic") or 0)
+        if unchosen > 0:
+            parts.append(f"{unchosen} not chosen (the same page or writer twice, or fewer than five fitted)")
         extra = f" ({'; '.join(parts)})" if parts else ""
         return f"{n} opening{'s' if n != 1 else ''} tonight: the crew confirmed {found} finding{'s' if found != 1 else ''}{extra}."
 
