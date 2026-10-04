@@ -90,6 +90,8 @@ async def verify_finding(finding: Finding, kind: str, evidence: Evidence, vc: Ve
     if problem:
         return None, problem
     status, final_url = await vc.http.check_link(ev.url)
+    if is_excluded(final_url):
+        return None, "source excluded by policy (login wall or no public API)"
     if status != 200:
         return None, f"the link answered {status or 'nothing'}"
     key = canonical_url(final_url)

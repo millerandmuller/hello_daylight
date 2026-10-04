@@ -40,6 +40,8 @@ def install() -> None:
             return record
 
         logging.setLogRecordFactory(factory)
+        old_format_exception = logging.Formatter.formatException
+        logging.Formatter.formatException = lambda self, ei: scrub(old_format_exception(self, ei))  # tracebacks too
         _factory_installed = True
     root = logging.getLogger()
     if not any(isinstance(f, KeyScrubber) for f in root.filters):

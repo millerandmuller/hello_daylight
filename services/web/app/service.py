@@ -131,15 +131,22 @@ async def run_private(
 
     # the lock: one run per project at a time; a stale lock means the earlier process died, then we resume it
     deadline = time.monotonic() + contract.lock_ttl_s + 10
+    waited = False
     while True:
         latest = (await asyncio.to_thread(repo.list_runs, project_id, 1))
         candidate = latest[0]["run_id"] if latest and latest[0].get("status") == "running" else None
         run_id = candidate or uuid.uuid4().hex[:16]
         ttl = 0.0 if takeover else contract.lock_ttl_s
         got = await asyncio.to_thread(repo.acquire_lock, project_id, run_id, ttl)
+        if got["acquired"] and waited and not got["takeover"]:
+            # We only waited for a DEAD holder to go stale. This one finished by itself: its run is the answer, a second one would be a double start.
+            await asyncio.to_thread(repo.release_lock, project_id, run_id)
+            await asyncio.to_thread(_refusal_ledger, repo, project_id, trigger, "already_running", "A run of this project was already in progress and has just finished.")
+            raise RunRefused("already_running", "A run of this project was already in progress and has just finished.")
         if got["acquired"]:
             break
         if wait_stale and time.monotonic() < deadline:
+            waited = True
             await asyncio.sleep(5)  # waiting for a lock to go stale costs no model call
             continue
         await asyncio.to_thread(_refusal_ledger, repo, project_id, trigger, "already_running", "A run of this project is already in progress.")
@@ -160,7 +167,7 @@ async def run_private(
 
 def _consume_feedback(repo: Repo, project_id: str, pinput: ProjectInput, run_id: str, ledger: dict) -> None:
     """Feedback is used once: the night that read it and wrote 'Changed because of your feedback'."""
-    if ledger.get("status") == "ok" and pinput.feedback:
+    if (ledger.get("status") == "ok" or (ledger.get("status") == "partial" and ledger.get("cards"))) and pinput.feedback:
         repo.mark_feedback(project_id, [f["id"] for f in pinput.feedback if f.get("id")], run_id)
 
 

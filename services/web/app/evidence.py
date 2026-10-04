@@ -19,6 +19,11 @@ _INJECTION_PATTERNS = [
     r"disregard (?:all|any|the|your|previous|prior|above)\b.{0,40}\b(?:instruction|prompt|rule)s?",
     r"disregard (?:the )?(?:above|everything)\b.{0,60}\b(?:and|then)\b",
     r"vergiss (?:alles|das) (?:bisherige|obige|gesagte)",
+    r"ignore the above\b.{0,40}\b(?:and|then)\b",
+    r"ignorier\w* (?:die|alle|deine) (?:regeln|anweisungen|vorgaben)",
+    r"you are now dan\b",
+    r"\bsystem prompt\s*:",
+    r"override your (?:rules|instructions)",
     r"forget (?:all|everything|your|previous|the above)\b.{0,30}\b(?:instruction|rule|prompt)s?",
     r"ignoriere (?:alle|die|deine|jegliche|vorherige)\w*\b.{0,30}(?:anweisung|instruktion|regel|vorgabe|prompt)",
     r"vergiss (?:alle|alles|deine|die)\w*\b.{0,30}(?:anweisung|regel|vorgabe)",
@@ -43,7 +48,9 @@ def injection_markers(*texts: str) -> list[str]:
     for text in texts:
         if not text:
             continue
-        for m in _INJECTION_RE.finditer(unicodedata.normalize("NFKC", text)):
+        # zero-width characters and runs of whitespace must not hide a phrase
+        flat = re.sub(r"\s+", " ", re.sub("[\u200b-\u200f\u2060\ufeff\u00ad]", "", unicodedata.normalize("NFKC", text)))
+        for m in _INJECTION_RE.finditer(flat):
             hits.append(m.group(0)[:80])
             if len(hits) >= 5:
                 return hits
@@ -79,11 +86,11 @@ def canonical_url(url: str) -> str:
 
 
 # Sources the brief rules out: login walls or no public API (X, LinkedIn, Skool), Reddit without a registered app.
-EXCLUDED_DOMAINS = ("reddit.com", "x.com", "twitter.com", "linkedin.com", "skool.com", "facebook.com", "instagram.com")
+EXCLUDED_DOMAINS = ("redd.it", "lnkd.in", "reddit.com", "x.com", "twitter.com", "linkedin.com", "skool.com", "facebook.com", "instagram.com")
 
 
 def is_excluded(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
     return any(host == d or host.endswith("." + d) for d in EXCLUDED_DOMAINS)
 
 

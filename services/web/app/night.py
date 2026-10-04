@@ -26,7 +26,7 @@ SKIP_IF_RAN_WITHIN_H = 18
 def _recent_run(repo, project_id: str) -> bool:
     for run in repo.list_runs(project_id, 3):
         started = parse_ts(run.get("started_at"))
-        if started and run.get("status") in ("running", "ok") and datetime.now(timezone.utc) - started < timedelta(hours=SKIP_IF_RAN_WITHIN_H):
+        if started and (run.get("status") in ("running", "ok") or (run.get("status") == "partial" and run.get("cards"))) and datetime.now(timezone.utc) - started < timedelta(hours=SKIP_IF_RAN_WITHIN_H):
             return True
     return False
 
