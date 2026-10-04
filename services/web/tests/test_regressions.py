@@ -1,4 +1,4 @@
-"""Regression tests for the findings of examiner round 1."""
+"""Regression tests for failures found in review: double start, dead links, rate limits, secrets."""
 
 import asyncio
 import json
