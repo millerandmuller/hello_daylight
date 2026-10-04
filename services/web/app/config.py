@@ -126,7 +126,7 @@ def contract_for(mode: str, budget_override: float | None = None) -> RunContract
         max_retries=_int("DAYLIGHT_MAX_RETRIES", 16),
         budget_eur=budget,
         scout_deadline_s=_float("DAYLIGHT_SCOUT_DEADLINE_S", 150.0),
-        lock_ttl_s=_float("DAYLIGHT_LOCK_TTL_S", 90.0),
+        lock_ttl_s=max(24.0, _float("DAYLIGHT_LOCK_TTL_S", 90.0)),  # never below three heartbeats (8 s), or a live run looks dead
         **shape,
     )
 
