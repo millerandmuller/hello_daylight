@@ -39,8 +39,8 @@ def assert_safe_config() -> None:
         raise RuntimeError("DAYLIGHT_AUTH_MODE=dev is not allowed on Cloud Run")
     if config.AUTH_MODE not in ("dev", "firebase"):
         raise RuntimeError("DAYLIGHT_AUTH_MODE must be 'firebase' or 'dev'")
-    if config.IS_CLOUD and len(config.SESSION_SECRET) < 32:
-        raise RuntimeError("DAYLIGHT_SESSION_SECRET (32+ characters) is required on Cloud Run")
+    if config.AUTH_MODE == "firebase" and len(config.SESSION_SECRET) < 32:
+        raise RuntimeError("DAYLIGHT_SESSION_SECRET (32+ random characters) is required with firebase sign-in")
 
 
 def _secret() -> bytes:

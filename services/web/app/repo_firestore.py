@@ -101,9 +101,6 @@ class FirestoreRepo(Repo):
                 transaction.set(ref, fresh)
                 return {"acquired": True, "holder": run_id, "takeover": False, "previous": None}
             cur = snap.to_dict()
-            if cur.get("run_id") == run_id:
-                transaction.set(ref, fresh)
-                return {"acquired": True, "holder": run_id, "takeover": False, "previous": None}
             beat = parse_ts(cur.get("heartbeat_at"))
             if beat is None or (now_dt() - beat).total_seconds() > ttl_s:
                 transaction.set(ref, fresh)

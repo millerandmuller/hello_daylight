@@ -56,7 +56,7 @@ def test_runs_checkpoints_and_mutation(store):
 def test_lock_refuses_a_live_holder_and_takes_over_a_dead_one(store):
     assert store.acquire_lock("proj-lock-1", "run-one-aaaa", 90)["acquired"]
     again = store.acquire_lock("proj-lock-1", "run-one-aaaa", 90)
-    assert again["acquired"] and not again["takeover"], "the holder may ask again"
+    assert not again["acquired"], "a second start of the SAME run id is a double start too"
     other = store.acquire_lock("proj-lock-1", "run-two-bbbb", 90)
     assert not other["acquired"] and other["holder"] == "run-one-aaaa"
     assert store.heartbeat("proj-lock-1", "run-one-aaaa") is True

@@ -8,5 +8,5 @@ COPY services/web services/web
 RUN useradd --create-home --uid 10001 daylight && rm -rf services/web/tests
 USER daylight
 WORKDIR /srv/services/web
-# Cloud Run sets PORT. Forwarded headers are trusted so the rate limit sees the visitor's address, not the proxy's.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers --forwarded-allow-ips='*'"]
+# Cloud Run sets PORT. The app reads the client address from the last X-Forwarded-For entry itself.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --no-proxy-headers"]

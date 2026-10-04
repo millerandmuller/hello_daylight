@@ -114,9 +114,9 @@ def contract_for(mode: str, budget_override: float | None = None) -> RunContract
     env_budget = os.getenv("DAYLIGHT_RUN_BUDGET_EUR")
     if env_budget not in (None, ""):
         try:
-            candidates.append(float(env_budget))
+            candidates.append(float(env_budget.replace(",", ".")))
         except ValueError:
-            pass
+            candidates.append(0.0)  # an unreadable budget must not mean "the full budget": it means none
     if budget_override is not None:
         candidates.append(budget_override)
     budget = max(0.0, min(candidates))

@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
-from .evidence import Evidence, EvidenceItem, canonical_url, domain_of, injection_markers, norm_text
+from .evidence import Evidence, EvidenceItem, canonical_url, domain_of, injection_markers, is_excluded, norm_text
 from .schemas import Finding
 from .web import SafeHttp
 
@@ -78,6 +78,8 @@ async def verify_finding(finding: Finding, kind: str, evidence: Evidence, vc: Ve
     ev = evidence.get(finding.url)
     if ev is None:
         return None, "not a result of a tool"
+    if is_excluded(ev.url):
+        return None, "source excluded by policy (login wall or no public API)"
     markers = ev.suspicious or injection_markers(ev.title, ev.text, ev.author, finding.why, finding.quote, finding.author_name or "")
     if markers:
         return None, "suspicious: text that looks like an instruction to a model"

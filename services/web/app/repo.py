@@ -276,9 +276,6 @@ class FileRepo(Repo):
             if cur is None:
                 self._write(path, fresh)
                 return {"acquired": True, "holder": run_id, "takeover": False, "previous": None}
-            if cur.get("run_id") == run_id:
-                self._write(path, fresh)
-                return {"acquired": True, "holder": run_id, "takeover": False, "previous": None}
             beat = parse_ts(cur.get("heartbeat_at"))
             if beat is None or (now_dt() - beat).total_seconds() > ttl_s:
                 self._write(path, fresh)

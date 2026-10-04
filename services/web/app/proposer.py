@@ -46,7 +46,7 @@ Rules:
 - {source_rule}
 - If something is unclear, say it is a guess ("probably", "seems").
 - Voice: plain, short, second person where you address the owner, no exclamation marks, no marketing adjectives.
-- Suggest {n_min}-{n_max} goals. Each goal is short (2-6 words) and has one reason that points at
+- Suggest at least {n_min} and at most {n_max} goals; never fewer than {n_min}. Each goal is short (2-6 words) and has one reason that points at
   something visible in the material (age of the page, missing prices, a waitlist, a changelog, a GitHub repo, a newsletter archive ...).
 - A goal is always about people outside the project that a search crew can find in public places
   (forum threads, issues, articles, newsletters, podcasts): first users, paying customers, press or podcast coverage,
@@ -91,7 +91,7 @@ def propose(page: PageSnapshot | None, description: str | None, user_goals: list
     api_key = api_key or config.operator_key()
     if not api_key:
         raise ProposalError("No Gemini API key configured.")
-    n_min, n_max = (1, 3) if user_goals else (2, 4)
+    n_min, n_max = (1, 3) if user_goals else (3, 5)
     prompt = PROMPT.format(
         today=date.today().isoformat(),
         n_min=n_min,

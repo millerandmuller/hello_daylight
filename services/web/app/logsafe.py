@@ -21,8 +21,26 @@ class KeyScrubber(logging.Filter):
         return True
 
 
+_factory_installed = False
+
+
 def install() -> None:
     """Idempotent. Call once at start-up of the web app, the night job and the CLI."""
+    global _factory_installed
+    if not _factory_installed:  # scrub at creation, so records of every logger are covered whatever handlers exist
+        old = logging.getLogRecordFactory()
+
+        def factory(*args, **kwargs):
+            record = old(*args, **kwargs)
+            try:
+                record.msg = scrub(record.getMessage())
+                record.args = ()
+            except Exception:  # noqa: BLE001
+                pass
+            return record
+
+        logging.setLogRecordFactory(factory)
+        _factory_installed = True
     root = logging.getLogger()
     if not any(isinstance(f, KeyScrubber) for f in root.filters):
         root.addFilter(KeyScrubber())

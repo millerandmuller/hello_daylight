@@ -17,6 +17,8 @@ MAX_PAGE_TEXT = 4000
 _INJECTION_PATTERNS = [
     r"ignore (?:all|any|every|the|your|previous|prior|above|earlier)\b.{0,40}\b(?:instruction|prompt|rule|direction)s?",
     r"disregard (?:all|any|the|your|previous|prior|above)\b.{0,40}\b(?:instruction|prompt|rule)s?",
+    r"disregard (?:the )?(?:above|everything)\b.{0,60}\b(?:and|then)\b",
+    r"vergiss (?:alles|das) (?:bisherige|obige|gesagte)",
     r"forget (?:all|everything|your|previous|the above)\b.{0,30}\b(?:instruction|rule|prompt)s?",
     r"ignoriere (?:alle|die|deine|jegliche|vorherige)\w*\b.{0,30}(?:anweisung|instruktion|regel|vorgabe|prompt)",
     r"vergiss (?:alle|alles|deine|die)\w*\b.{0,30}(?:anweisung|regel|vorgabe)",
@@ -74,6 +76,15 @@ def canonical_url(url: str) -> str:
     query = urlencode([(k, v) for k, v in parse_qsl(p.query) if k.lower() not in _TRACKING])
     path = p.path.rstrip("/") or "/"
     return urlunparse((p.scheme.lower(), (p.hostname or "").lower() + (f":{p.port}" if p.port else ""), path, "", query, ""))
+
+
+# Sources the brief rules out: login walls or no public API (X, LinkedIn, Skool), Reddit without a registered app.
+EXCLUDED_DOMAINS = ("reddit.com", "x.com", "twitter.com", "linkedin.com", "skool.com", "facebook.com", "instagram.com")
+
+
+def is_excluded(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in EXCLUDED_DOMAINS)
 
 
 def domain_of(url: str) -> str:

@@ -65,6 +65,7 @@ class RunMeter:
         self.retries = 0
         self.replacements = 0
         self.search_queries = 0
+        self.search_reserved = 0
         self.spent_eur = 0.0
         self.reserved_eur = 0.0
         self.stopped: str | None = None
@@ -113,16 +114,17 @@ class RunMeter:
         if self.stopped:
             raise RunStopped(self.stopped, self.stopped_detail)
 
-    def est_cost(self, tier: str, model: str, chars_in: int) -> float:
+    def est_cost(self, tier: str, model: str, chars_in: int, step: str = "") -> float:
         price_in, price_out = config.price_for(model)
+        fee = 3 * config.SEARCH_EUR_PER_QUERY if step == "search" else 0.0  # a grounded call may fire up to ~3 billed queries
         return (
             estimate_tokens(chars_in) * price_in + config.MAX_OUTPUT_TOKENS.get(tier, 4000) * price_out
-        ) / 1_000_000
+        ) / 1_000_000 + fee
 
     def before_call(self, step: str, tier: str, model: str, chars_in: int) -> float:
         """Reserve the worst-case cost of one call. Raises RunStopped instead of letting the call happen."""
         self.check_alive()
-        est = self.est_cost(tier, model, chars_in)
+        est = self.est_cost(tier, model, chars_in, step)
         with self._lock:
             if self.calls >= self.contract.max_steps:
                 self.stopped, self.stopped_detail = "max_steps", f"{self.calls} calls"
@@ -162,6 +164,18 @@ class RunMeter:
     def release(self, reserved: float) -> None:
         with self._lock:
             self.reserved_eur = max(0.0, self.reserved_eur - reserved)
+
+    def reserve_search(self, n: int = 3) -> bool:
+        """Claim room for the queries of one grounded call (a call may fire up to ~3). False when the allowance is gone."""
+        with self._lock:
+            if self.search_queries + self.search_reserved >= self.contract.max_search_queries:
+                return False
+            self.search_reserved += n
+            return True
+
+    def release_search(self, n: int = 3) -> None:
+        with self._lock:
+            self.search_reserved = max(0, self.search_reserved - n)
 
     def add_search(self, step: str, n: int) -> None:
         """Grounding queries found after the fact (the fee is billed per query)."""

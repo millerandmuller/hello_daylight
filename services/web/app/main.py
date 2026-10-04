@@ -49,7 +49,7 @@ def store() -> ProjectStore:
 # --------------------------------------------------------------------------------------------------
 _CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 _CSP_LOGIN = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.googleusercontent.com; "
+    "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self'; img-src 'self' data: https://*.googleusercontent.com; "
     "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; "
     "frame-src https://*.firebaseapp.com https://accounts.google.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 )
@@ -59,7 +59,9 @@ _CSP_LOGIN = (
 async def headers(request: Request, call_next):
     if request.url.path.startswith("/api/public/"):
         length = request.headers.get("content-length")
-        if length and length.isdigit() and int(length) > config.PUBLIC_MAX_BODY_BYTES:
+        if request.method == "POST" and not (length and length.isdigit()):
+            return JSONResponse({"error": "Content-Length is required."}, status_code=411)  # a chunked body would dodge the size limit
+        if length and int(length) > config.PUBLIC_MAX_BODY_BYTES:
             return JSONResponse({"error": "Request too large."}, status_code=413)
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = _CSP_LOGIN if request.url.path == "/login" else _CSP
@@ -531,6 +533,11 @@ _run_window, _intake_window, _check_window = _Window(), _Window(), _Window()
 
 
 def _client_ip(request: Request) -> str:
+    """On Cloud Run the proxy appends the real client address as the LAST entry; everything before it is client-supplied."""
+    if config.IS_CLOUD:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 

@@ -55,7 +55,10 @@ class SafeHttp:
         except fetcher.FetchError as exc:
             raise WebError(exc.reason)
         for hop in range(MAX_REDIRECTS + 1):
-            await fetcher._check_public_host(current)
+            try:
+                await fetcher._check_public_host(current)
+            except fetcher.FetchError as exc:  # a private or dead address is a dropped finding, never a failed night
+                raise WebError(exc.reason)
             try:
                 async with self._client.stream("GET", current, params=params if hop == 0 else None, headers=headers) as resp:
                     if resp.is_redirect:

@@ -160,7 +160,7 @@ async def run_private(
 
 def _consume_feedback(repo: Repo, project_id: str, pinput: ProjectInput, run_id: str, ledger: dict) -> None:
     """Feedback is used once: the night that read it and wrote 'Changed because of your feedback'."""
-    if ledger.get("status") in ("ok", "partial") and pinput.feedback:
+    if ledger.get("status") == "ok" and pinput.feedback:
         repo.mark_feedback(project_id, [f["id"] for f in pinput.feedback if f.get("id")], run_id)
 
 

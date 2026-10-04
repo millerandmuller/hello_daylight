@@ -287,6 +287,8 @@ class NightRun:
     def _final_status(self) -> tuple[str, str]:
         missing = [t for t in self.S["tasks"].values() if t["status"] == "missing"]
         if not self.S["cards"]:
+            if missing:
+                return "partial", f"{len(missing)} of {len(self.S['tasks'])} scouts did not finish, no openings"
             return "ok", "no_openings"
         if missing:
             return "partial", f"{len(missing)} scout(s) did not finish"
@@ -661,6 +663,8 @@ class NightRun:
             headline = REASON_TEXT["cancelled"]
         elif status == "failed":
             headline = f"This night did not run: {reason}."
+        elif status == "partial" and not self.S.get("cards"):
+            headline = f"No openings tonight, and {len(missing)} scout(s) did not finish: this is not an empty result."
         elif reason == "no_openings":
             headline = "No openings tonight: nothing the checks could confirm."
         elif len(self.S.get("cards", [])) < self.contract.max_cards:

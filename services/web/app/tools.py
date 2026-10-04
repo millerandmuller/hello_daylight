@@ -18,7 +18,7 @@ from defusedxml import ElementTree as DefusedET
 from google.adk.tools import google_search
 
 from . import fetcher
-from .evidence import Evidence, EvidenceItem, domain_of, injection_markers, sanitize
+from .evidence import Evidence, EvidenceItem, domain_of, injection_markers, is_excluded, sanitize
 from .llm import CallFailed, ModelGateway
 from .meter import RunStopped
 from .web import SafeHttp, WebError
@@ -238,6 +238,8 @@ def make_tools(ctx: ToolContext) -> list[Callable]:
         if ctx.over_limit() or ctx.fetches >= ctx.max_fetches:
             return {"error": "tool limit reached: give your final answer now with what you have"}
         ctx.fetches += 1
+        if is_excluded(url):
+            return {"error": "that site is excluded (login wall or no public API); use another source"}
         page = await read_page_snapshot(ctx.http, url)
         if isinstance(page, str):
             return {"error": page}
@@ -269,7 +271,7 @@ def make_tools(ctx: ToolContext) -> list[Callable]:
         if ctx.over_limit() or ctx.searches >= ctx.max_searches or ctx.gateway is None:
             return {"error": "search limit reached: give your final answer now with what you have"}
         meter = ctx.gateway.meter
-        if meter.search_queries >= meter.contract.max_search_queries:
+        if not meter.reserve_search():
             ctx.notes.add("web search stopped: the search allowance of this run was used up")
             return {"error": "the search allowance for this run is used up: use the other tools and give your final answer"}
         ctx.searches += 1
@@ -286,9 +288,12 @@ def make_tools(ctx: ToolContext) -> list[Callable]:
                 max_model_calls=3,
             )
         except RunStopped:
+            meter.release_search()
             raise
         except CallFailed as exc:
+            meter.release_search()
             return {"error": f"search failed: {exc.reason}"}
+        meter.release_search()
         uris = list(dict.fromkeys(g["uri"] for g in res.grounding))[:6]
 
         async def resolve(uri: str):
