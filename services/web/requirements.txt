@@ -9,3 +9,5 @@ python-multipart==0.0.32
 httpx==0.28.1
 beautifulsoup4==4.15.0
 python-dotenv==1.2.4
+defusedxml==0.7.1
+google-cloud-firestore==2.22.0

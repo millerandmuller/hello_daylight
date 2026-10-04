@@ -15,9 +15,15 @@ def _submit(client, **form):
 
 
 def test_intake_form_renders(client):
-    r = client.get("/")
+    r = client.get("/app")
     assert r.status_code == 200
     assert "Link to your project" in r.text
+
+
+def test_front_door_is_open_and_says_what_it_does(anon):
+    r = anon.get("/")
+    assert r.status_code == 200
+    assert "Nothing leaves this app on its own" in r.text
 
 
 def test_url_only_gives_card_with_reasoned_suggestions(client, calls):

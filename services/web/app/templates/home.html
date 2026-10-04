@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="intake">
+  <h1>Real people, found while you sleep.</h1>
+  <p class="lede">Give Hello Daylight the link to your project in the evening. A lead agent hires its own small crew for the night, checks what they find, and by morning five openings lie ready to sign: public questions your project answers, and writers who already cover your topic.</p>
+  <p class="lede">It writes, you send. Nothing leaves this app on its own.</p>
+  <p class="actions">
+    <a class="button" href="/try">Try it with your own Gemini key</a>
+    <a class="button secondary" href="/login">Sign in</a>
+  </p>
+  <p class="muted small">Without sign-in your key stays in your browser and nothing about your project is stored on the server.
+    The code is open: <a href="{{ repo_url }}" rel="noopener noreferrer">{{ repo_url }}</a>. <a href="/self-host">Run it yourself</a>.</p>
+</section>
+{% endblock %}

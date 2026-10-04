@@ -1,0 +1,8 @@
+{
+  "name": "hello-daylight-firebase-auth",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "esbuild src.js --bundle --minify --format=esm --outfile=../../services/web/app/static/firebase-auth.js" },
+  "dependencies": { "firebase": "^12.0.0" },
+  "devDependencies": { "esbuild": "^0.25.0" }
+}

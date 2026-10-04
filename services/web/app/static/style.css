@@ -90,3 +90,56 @@ form.inline { display: inline; }
 @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
 @media (max-width: 560px) { .goal.removed { flex-direction: row; flex-wrap: wrap; } }
+
+/* --- navigation, desk, openings, crew ---------------------------------------------------------- */
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.nav { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; font-size: 0.92rem; }
+.nav a { color: var(--accent); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+.steps { padding-left: 20px; }
+.project-list { list-style: none; padding: 0; }
+.project-list li { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.feedback-note { background: var(--surface); border-left: 4px solid var(--accent); padding: 10px 14px; margin: 12px 0; border-radius: 0 var(--radius) var(--radius) 0; }
+.desk h1 { margin-bottom: 12px; }
+.opening { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin: 14px 0; }
+.opening h2 { margin: 0 0 4px; font-size: 1.1rem; overflow-wrap: anywhere; }
+.opening .why { margin: 8px 0; }
+.opening blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--line); color: var(--muted); font-size: 0.95rem; overflow-wrap: anywhere; }
+.draft { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 4px 0 12px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.edit summary, .project-details > summary, .unfinished summary { cursor: pointer; color: var(--accent); margin: 6px 0; }
+.edit textarea { margin: 8px 0; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.thumbs input { flex: 1 1 220px; width: auto; }
+button.picked { background: var(--accent); color: var(--accent-text); }
+.run-actions { margin: 20px 0; }
+.run-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.run-form label { margin-top: 0; font-weight: 400; }
+input.short { width: 14rem; max-width: 100%; }
+.project-details { margin-top: 32px; }
+.chip { display: inline-block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 8px; border-radius: 99px; background: var(--line); color: var(--text); vertical-align: middle; }
+.chip.running, .chip.replacing { background: #dbe8f7; }
+.chip.done, .chip.ok { background: #dcefe0; color: var(--ok); }
+.chip.not_started { background: var(--line); color: var(--muted); }
+.chip.missing, .chip.stopped, .chip.failed, .chip.cancelled, .chip.refused { background: var(--error-bg); color: var(--error); }
+.chip.partial { background: var(--warn-bg); }
+.crew { list-style: none; padding: 0; }
+.task { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin: 8px 0; }
+.task p { margin: 4px 0; }
+.task.replacing, .task.running { border-color: var(--accent); }
+.replaced { background: var(--warn-bg); border-radius: var(--radius); padding: 6px 10px; }
+.status-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.table-wrap { overflow-x: auto; }
+table.ledger { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+table.ledger th, table.ledger td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+code { background: var(--line); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+
+/* --- public mode ----------------------------------------------------------------------------- */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin: 16px 0; }
+.panel h2 { margin-top: 0; }
+.panel[hidden] { display: none; }
+.keyline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.keyline input { flex: 1 1 260px; width: auto; }
+.ok-text { color: var(--ok); font-weight: 600; }
+@media (max-width: 560px) { .opening { padding: 14px; } main { padding-left: 16px; padding-right: 16px; } }
+button.spaced { margin-top: 16px; }

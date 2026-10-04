@@ -1,9 +1,8 @@
 """Intake: read the project and suggest goals, each with a reason. One fast-model call, not the nightly planner."""
 
-import os
 from datetime import date
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from . import config
 from .fetcher import PageSnapshot
@@ -26,6 +25,11 @@ class ProjectCard(BaseModel):
 class Proposal(BaseModel):
     project: ProjectCard
     goals: list[GoalSuggestion]
+    _usage: dict = PrivateAttr(default_factory=dict)  # model, tokens, cost of the one call; for the ledger, not for the model
+
+    @property
+    def usage(self) -> dict:
+        return self._usage
 
 
 class ProposalError(Exception):
@@ -79,11 +83,12 @@ def _material(page: PageSnapshot | None, description: str | None) -> str:
     return "\n".join(parts).replace("</material>", "").replace("<material>", "")
 
 
-def propose(page: PageSnapshot | None, description: str | None, user_goals: list[str]) -> Proposal:
+def propose(page: PageSnapshot | None, description: str | None, user_goals: list[str], api_key: str | None = None) -> Proposal:
+    """One model call. `api_key` is the visitor's own key in the public mode; None means the operator's key."""
     from google import genai
     from google.genai import types
 
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = api_key or config.operator_key()
     if not api_key:
         raise ProposalError("No Gemini API key configured.")
     n_min, n_max = (1, 3) if user_goals else (2, 4)
@@ -119,4 +124,9 @@ def propose(page: PageSnapshot | None, description: str | None, user_goals: list
         except Exception as exc:
             raise ProposalError("Model answer was not valid.") from exc
     proposal.goals = [g for g in proposal.goals if g.text.strip()][:n_max]
+    usage = response.usage_metadata
+    t_in = (getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+    t_out = ((getattr(usage, "candidates_token_count", 0) or 0) + (getattr(usage, "thoughts_token_count", 0) or 0)) if usage else 0
+    price_in, price_out = config.price_for(config.MODEL)
+    proposal._usage = {"model": config.MODEL, "calls": 1, "tokens_in": t_in, "tokens_out": t_out, "cost_eur": round((t_in * price_in + t_out * price_out) / 1_000_000, 5)}
     return proposal

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Admin · Hello Daylight{% endblock %}
+{% block content %}
+<h1>Admin</h1>
+
+<h2>Who may enter</h2>
+<p class="muted small">Operators come from the server configuration and always may enter. Everyone else needs a line here.</p>
+<ul>
+{% for a in allow %}
+  <li>{{ a.email }}
+    <form method="post" action="/admin/allow/remove" class="inline"><input type="hidden" name="email" value="{{ a.email }}"><button type="submit" class="link">Remove</button></form></li>
+{% else %}<li class="muted">Nobody yet.</li>{% endfor %}
+</ul>
+<form method="post" action="/admin/allow" class="run-form">
+  <label class="visually-hidden" for="allow-email">Email</label>
+  <input id="allow-email" name="email" type="email" required placeholder="name@example.com" class="short">
+  <button type="submit" class="secondary">Add</button>
+</form>
+
+<h2>Money</h2>
+<p>This month, all workspaces: {{ "%.2f"|format(month_total) }} EUR of {{ "%.2f"|format(global_cap) }} EUR. At the cap, no further run starts.</p>
+<form method="post" action="/admin/budget" class="run-form">
+  <label for="gcap">Cap for all workspaces together (EUR per month)</label>
+  <input id="gcap" name="global_cap_eur" inputmode="decimal" value="{{ '%.2f'|format(global_cap) }}" class="short">
+  <button type="submit" class="secondary">Save</button>
+</form>
+
+<h2>Runs in progress</h2>
+{% for r in running %}
+  <form method="post" action="/admin/cancel" class="inline"><input type="hidden" name="run_id" value="{{ r.run_id }}">
+  Run {{ r.run_id }} started {{ r.started_at[:16] | replace("T", " ") }} <button type="submit" class="link">Stop it</button></form><br>
+{% else %}<p class="muted">None.</p>{% endfor %}
+
+<h2>Ledger, all workspaces</h2>
+<div class="table-wrap"><table class="ledger">
+  <thead><tr><th>Started</th><th>Mode</th><th>Trigger</th><th>Status</th><th>Cost</th><th>Why</th></tr></thead>
+  <tbody>{% for l in ledger %}<tr><td>{{ l.started_at[:16] | replace("T", " ") }}</td><td>{{ l.mode }}</td><td>{{ l.trigger }}</td><td>{{ l.status }}</td><td>{{ "%.2f"|format(l.cost_eur) }} EUR</td><td>{{ l.kill_switch or l.reason or "" }}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

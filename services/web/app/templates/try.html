@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Try it · Hello Daylight{% endblock %}
+{% block head %}<script src="/static/public.js" defer></script>{% endblock %}
+{% block content %}
+<h1>Try it with your own key</h1>
+<p class="lede">No account. You bring a Gemini API key; it stays in this browser. Your project, goals, results and feedback stay in this browser too. A run costs you up to {{ "%.2f"|format(ceiling) }} EUR on your own key and starts only when you click.</p>
+
+<section class="panel" id="key-panel" aria-labelledby="key-h">
+  <h2 id="key-h">1. Your Gemini key</h2>
+  <p class="hint">Create one for free at <a href="https://aistudio.google.com/apikey" rel="noopener noreferrer" target="_blank">Google AI Studio</a>. Each run sends it once, over HTTPS, to this server, which holds it in memory for that run only. It is never written to a log, a database or a file.</p>
+  <div id="key-form" class="keyline">
+    <label class="visually-hidden" for="key-input">Gemini API key</label>
+    <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…">
+    <button type="button" id="key-save">Check and keep in this browser</button>
+  </div>
+  <p id="key-state" class="hint" role="status"></p>
+  <button type="button" id="key-delete" class="secondary" hidden>Delete key</button>
+</section>
+
+<section class="panel" id="intake-panel" hidden aria-labelledby="intake-h">
+  <h2 id="intake-h">2. Your project</h2>
+  <label for="p-url">Link to your project</label>
+  <span class="hint">Landing page, repo or newsletter archive.</span>
+  <input id="p-url" type="text" inputmode="url" placeholder="https://">
+  <div id="p-desc-wrap" hidden>
+    <label for="p-desc">Your project in one sentence</label>
+    <input id="p-desc" type="text" maxlength="1000">
+  </div>
+  <label for="p-goals">What should come out of this? <span class="optional">Optional</span></label>
+  <span class="hint">One per line. Or leave it empty and I suggest goals and tell you why.</span>
+  <textarea id="p-goals" rows="3"></textarea>
+  <p><button type="button" id="intake-go">Read my project</button></p>
+  <p id="intake-state" class="hint" role="status"></p>
+</section>
+
+<section class="panel" id="goals-panel" hidden aria-labelledby="goals-h">
+  <h2 id="goals-h">3. Goals</h2>
+  <div id="project-card"></div>
+  <p class="hint">Keep, change or remove any suggestion, and add your own.</p>
+  <ul class="goal-list" id="goal-list"></ul>
+  <div class="goal-add"><label class="visually-hidden" for="goal-new">Add a goal</label><input id="goal-new" maxlength="200" placeholder="Beta testers in the DACH region"><button type="button" id="goal-add" class="secondary">Add goal</button></div>
+</section>
+
+<section class="panel" id="run-panel" hidden aria-labelledby="run-h">
+  <h2 id="run-h">4. Run</h2>
+  <p class="hint">The lead hires a crew of up to 8 scouts, the code checks every link, quote and date, and you get up to five openings. It takes a few minutes; keep this tab open.</p>
+  <div class="run-form">
+    <button type="button" id="run-go">Run now</button>
+    <button type="button" id="run-stop" class="secondary" hidden>Stop</button>
+    <label for="run-budget">Budget for this run (EUR)</label>
+    <input id="run-budget" class="short" inputmode="decimal" placeholder="{{ '%.2f'|format(ceiling) }}">
+  </div>
+  <p id="run-state" class="hint" role="status"></p>
+  <p id="feedback-note" class="feedback-note" hidden></p>
+  <ol class="crew" id="crew"></ol>
+</section>
+
+<section id="results" aria-label="Openings"></section>
+<section class="panel" id="inbox-panel" hidden aria-labelledby="inbox-h"><h2 id="inbox-h">Inbox</h2><p class="hint">Drafts you signed. Copy one and send it yourself.</p><div id="inbox"></div></section>
+
+<p class="muted small"><button type="button" id="wipe" class="link">Delete everything in this browser</button> · <a href="{{ repo_url }}" rel="noopener noreferrer">Source code</a></p>
+{% endblock %}

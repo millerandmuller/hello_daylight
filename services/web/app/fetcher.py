@@ -2,10 +2,12 @@
 
 import asyncio
 import ipaddress
+import json
 import re
 import socket
 import zlib
 from dataclasses import dataclass, field
+from datetime import date
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -45,9 +47,17 @@ class PageSnapshot:
     dates_found: list[str] = field(default_factory=list)
     mentions_pricing: bool = False
     last_modified: str | None = None
+    published: str | None = None  # ISO date the page states: its own markup, else the first full date in its text
+    date_basis: str | None = None  # "markup" or "text"
+    author: str = ""
+    author_url: str | None = None
+    links: list[str] = field(default_factory=list)  # absolute links on the page, for checking a contact route
 
     def to_dict(self) -> dict:
-        return self.__dict__.copy()
+        """What a stored project keeps. The link list is only needed while a run checks a contact route."""
+        data = self.__dict__.copy()
+        data.pop("links", None)
+        return data
 
 
 def normalize_url(raw: str) -> str:
@@ -175,6 +185,9 @@ def extract(url: str, final_url: str, html: str, last_modified: str | None = Non
 
     title = meta("og:title") or (soup.title.string.strip() if soup.title and soup.title.string else "")
     description = meta("og:description", "description")
+    published, author, author_url = _byline(soup, meta, final_url)
+    date_basis = "markup" if published else None
+    links = _links(soup, final_url)
     for tag in soup(["script", "style", "noscript", "svg", "template", "iframe"]):
         tag.decompose()
     headings = [h.get_text(" ", strip=True) for h in soup.find_all(["h1", "h2", "h3"])]
@@ -184,6 +197,9 @@ def extract(url: str, final_url: str, html: str, last_modified: str | None = Non
     dates: list[str] = []
     for pattern in _DATE_PATTERNS:
         dates.extend(re.findall(pattern, text))
+    if not published:
+        published = _first_text_date(text[:2500])
+        date_basis = "text" if published else None
     return PageSnapshot(
         url=url,
         final_url=final_url,
@@ -194,7 +210,104 @@ def extract(url: str, final_url: str, html: str, last_modified: str | None = Non
         dates_found=list(dict.fromkeys(dates))[:10],
         mentions_pricing=bool(_PRICE_RE.search(text)),
         last_modified=last_modified,
+        published=published,
+        date_basis=date_basis,
+        author=author,
+        author_url=author_url,
+        links=links,
     )
+
+
+def _iso_date(raw: str | None) -> str | None:
+    """YYYY-MM-DD from an ISO-like timestamp, or None. Only dates the page states itself."""
+    if not raw:
+        return None
+    m = re.match(r"\s*(20\d\d)-(\d\d)-(\d\d)", raw)
+    if not m:
+        return None
+    y, mo, d = (int(x) for x in m.groups())
+    if not (1 <= mo <= 12 and 1 <= d <= 31):
+        return None
+    return f"{y:04d}-{mo:02d}-{d:02d}"
+
+
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_TEXT_DATES = [
+    (re.compile(r"\b(20\d\d)-(\d\d)-(\d\d)\b"), lambda m: (m[1], m[2], m[3])),
+    (re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?,? (20\d\d)\b"), lambda m: (m[3], _MONTHS[m[1].lower()], m[2])),
+    (re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)? (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?,? (20\d\d)\b"), lambda m: (m[3], _MONTHS[m[2].lower()], m[1])),
+    (re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(20\d\d)\b"), lambda m: (m[3], m[2], m[1])),
+]
+
+
+def _first_text_date(text: str) -> str | None:
+    """The earliest-positioned full date in the text. Weaker than a page's own markup, so it is labelled 'text'."""
+    best: tuple[int, str] | None = None
+    for pattern, build in _TEXT_DATES:
+        m = pattern.search(text)
+        if not m:
+            continue
+        try:
+            y, mo, d = (int(x) for x in build(m))
+            iso = date(y, mo, d).isoformat()
+        except ValueError:
+            continue
+        if best is None or m.start() < best[0]:
+            best = (m.start(), iso)
+    return best[1] if best else None
+
+
+def _byline(soup, meta, base_url: str) -> tuple[str | None, str, str | None]:
+    """Publication date, author name and author page, from the page's own markup."""
+    published = _iso_date(meta("article:published_time", "datePublished", "date", "og:article:published_time"))
+    author = meta("author", "article:author", "twitter:creator")
+    author_url = None
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            data = json.loads(script.string or "")
+        except ValueError:
+            continue
+        for node in data if isinstance(data, list) else [data]:
+            if not isinstance(node, dict):
+                continue
+            graph = node.get("@graph")
+            for item in graph if isinstance(graph, list) else [node]:
+                if not isinstance(item, dict):
+                    continue
+                published = published or _iso_date(item.get("datePublished"))
+                who = item.get("author")
+                if isinstance(who, list) and who:
+                    who = who[0]
+                if isinstance(who, dict):
+                    author = author or str(who.get("name") or "")
+                    if who.get("url") and not author_url:
+                        author_url = urljoin(base_url, str(who["url"]))
+                elif isinstance(who, str):
+                    author = author or who
+    if not published:
+        time_tag = soup.find("time", attrs={"datetime": True})
+        if time_tag:
+            published = _iso_date(time_tag["datetime"])
+    rel = soup.find("a", attrs={"rel": re.compile(r"\bauthor\b")})
+    if rel and rel.get("href"):
+        author_url = author_url or urljoin(base_url, rel["href"])
+        author = author or rel.get_text(" ", strip=True)
+    if author.startswith("http"):
+        author = ""
+    return published, author.strip()[:120], (author_url[:500] if author_url else None)
+
+
+def _links(soup, base_url: str) -> list[str]:
+    out: list[str] = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if href.lower().startswith("mailto:"):
+            out.append(href.split("?")[0])
+        elif href.lower().startswith(("http://", "https://", "/")):
+            out.append(urljoin(base_url, href))
+        if len(out) >= 300:
+            break
+    return list(dict.fromkeys(out))
 
 
 def is_readable(page: PageSnapshot) -> bool:

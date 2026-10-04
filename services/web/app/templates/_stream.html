@@ -1,0 +1,36 @@
+<div id="stream" {% if run and run.status == "running" and run_state != "stale" %}hx-get="/p/{{ project.id }}/stream/partial" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+{% if not run %}
+  <p class="muted">No run yet.</p>
+{% else %}
+  <p class="status-line"><span class="chip {{ run.status }}">{{ run.status }}</span>
+    {% if run.headline %}{{ run.headline }}{% elif run.status == "running" %}The crew is at work.{% endif %}
+    {% if run.status == "running" %}
+    <form method="post" action="/p/{{ project.id }}/cancel" class="inline"><button type="submit" class="link">Stop this run</button></form>
+    {% endif %}
+  </p>
+  {% if run.feedback_note %}<p class="feedback-note"><strong>Changed because of your feedback:</strong> {{ run.feedback_note }}</p>{% endif %}
+  {% if run.notes %}<ul class="small muted">{% for n in run.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+  {% if not run.plan_view %}
+    <p class="muted">The lead is reading your goals and hiring the crew.</p>
+  {% endif %}
+  <ol class="crew">
+  {% for t in run.plan_view %}
+    <li class="task {{ t.status }}" id="{{ t.id }}">
+      <p><span class="chip {{ t.status }}">{{ t.status }}</span> <strong>{{ t.role }}</strong>
+        <span class="muted small">{{ "question" if t.kind == "question" else "writer" }} · {{ t.found }} found</span></p>
+      <p class="reason">{{ t.rationale }}</p>
+      <details><summary>Its instruction</summary><p class="small">{{ t.instruction }}</p><p class="small muted">Tools: {{ t.tools | join(", ") }}</p></details>
+      {% if t.reason %}<p class="small">{{ t.reason }}</p>{% endif %}
+      {% for h in t.history %}
+      <p class="replaced small"><strong>Replaced.</strong> {{ h.reason }}
+        {% if h.new_instruction %}<br><span class="muted">New instruction: {{ h.new_instruction }}</span>{% endif %}
+        {% if h.found is not none %}<br><span class="muted">The replacement found {{ h.found }}.</span>{% endif %}</p>
+      {% endfor %}
+      {% if t.dropped %}<details><summary class="small">{{ t.dropped | length }} dropped by the checks</summary>
+        <ul class="small">{% for d in t.dropped %}<li>{{ d.reason }}{% if d.url %}: <span class="muted">{{ d.url }}</span>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+    </li>
+  {% endfor %}
+  </ol>
+  {% if run.cost_line %}<p class="small muted">{{ run.cost_line }}</p>{% endif %}
+{% endif %}
+</div>

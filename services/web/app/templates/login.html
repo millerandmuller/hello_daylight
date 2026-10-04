@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Hello Daylight{% endblock %}
+{% block head %}<script src="/static/login.js" defer></script>{% endblock %}
+{% block content %}
+<section class="intake" id="login" data-dev="{{ 'yes' if dev else 'no' }}" data-config='{{ firebase_config }}'>
+  <h1>Sign in</h1>
+  {% if dev %}
+  <p class="notice">Development login. Not available in the cloud.</p>
+  <form id="dev-form">
+    <label for="dev-email">Email</label>
+    <input id="dev-email" type="email" required placeholder="you@example.com">
+    <button type="submit" class="spaced">Sign in</button>
+  </form>
+  {% else %}
+  <p class="lede">Use your Google account. Only accounts on the list can enter.</p>
+  <button type="button" id="google-signin">Sign in with Google</button>
+  {% endif %}
+  <p id="login-message" class="notice error" role="alert" hidden></p>
+</section>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Projects · Hello Daylight{% endblock %}
+{% block content %}
+<section>
+  <h1>Your projects</h1>
+  {% if projects %}
+  <ul class="project-list">
+    {% for p in projects %}
+    <li><a href="/p/{{ p.id }}">{{ p.card.name if p.card else p.url }}</a>
+      <span class="muted small">{% if p.last_run %}last night: {{ p.last_run.status }}{% else %}no night yet{% endif %}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No project yet.</p>
+  {% endif %}
+</section>
+{% include "_intake_form.html" %}
+{% endblock %}

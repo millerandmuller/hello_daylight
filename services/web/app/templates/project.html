@@ -1,32 +1,68 @@
 {% extends "base.html" %}
 {% block title %}{{ project.card.name }} · Hello Daylight{% endblock %}
+{% block head %}<script src="/static/desk.js" defer></script>{% endblock %}
 {% block content %}
-<article class="card project-card">
-  <p class="eyebrow">Your project</p>
-  <h1>{{ project.card.name }}</h1>
-  {% if project.card.one_liner %}<p class="lede">{{ project.card.one_liner }}</p>{% endif %}
-  {% if project.card.audience %}<p><span class="label">Probably for</span> {{ project.card.audience }}</p>{% endif %}
-  {% if project.card.observations %}
-  <ul class="observations">
-    {% for o in project.card.observations %}<li>{{ o }}</li>{% endfor %}
-  </ul>
+{% if flash %}<p class="notice error" role="alert">{{ flash }}</p>{% endif %}
+
+<section class="desk" aria-labelledby="desk-title">
+  <p class="eyebrow">{{ project.card.name }}</p>
+  <h1 id="desk-title">This morning</h1>
+
+  {% if run and run.status == "running" %}
+    <p class="notice" id="running-note">A run is {% if run_state == "stale" %}stuck (no sign of life); starting again resumes it{% else %}in progress{% endif %}.
+      <a href="/p/{{ project.id }}/stream">Watch the crew</a></p>
   {% endif %}
-  <p class="source">
-    Read from <a href="{{ project.url }}" rel="noopener noreferrer" target="_blank">{{ project.url }}</a>
-    {% if project.fetch_error %}<br><span class="muted">The page was not readable ({{ project.fetch_error | trim(".") }}). I worked from your description.</span>{% endif %}
-  </p>
-</article>
 
-{% if project.proposal_error %}
-<div class="notice error" role="alert">
-  {{ project.proposal_error }} Your own goals are saved.
-  <form method="post" action="/p/{{ project.id }}/propose" class="inline">
-    <button type="submit">Try again</button>
-  </form>
-</div>
-{% endif %}
+  {% if run and run.feedback_note %}
+    <p class="feedback-note"><strong>Changed because of your feedback:</strong> {{ run.feedback_note }}</p>
+  {% endif %}
+  {% if run and run.headline %}
+    <p class="notice {% if run.status in ('stopped','failed','cancelled') %}error{% endif %}" role="status">{{ run.headline }}{% if run.incomplete and run.status in ('stopped','cancelled') %} What is below is incomplete.{% endif %}</p>
+  {% endif %}
 
-{% include "_goals.html" %}
+  {% include "_cards.html" %}
 
-<p class="muted small">This link is private to you. Keep it; it is the only way back to this project.</p>
+  {% if run and run.unfinished %}
+  <details class="unfinished" open>
+    <summary>Findings that did not become openings (incomplete)</summary>
+    <ul>{% for u in run.unfinished %}<li><a href="{{ u.url }}" rel="noopener noreferrer" target="_blank">{{ u.title }}</a> <span class="muted small">{{ u.source }}, {{ u.date }}</span></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+
+  {% if not run %}
+  <p class="muted">No night has run for this project yet.{% if confirm_state == "none" %} Confirm your goals below first.{% endif %}</p>
+  {% endif %}
+
+  <div class="run-actions">
+    {% if project.confirmed_goals is not none %}
+    <form method="post" action="/p/{{ project.id }}/run" class="run-form">
+      <button type="submit" {% if run_state == "running" %}disabled{% endif %}>{% if run_state == "stale" %}Resume the run{% else %}Run now{% endif %}</button>
+      <label class="visually-hidden" for="run-budget">Lower the budget for this run (EUR)</label>
+      <input id="run-budget" name="budget" inputmode="decimal" placeholder="budget in EUR, optional" class="short">
+    </form>
+    {% endif %}
+    <p class="muted small"><a href="/p/{{ project.id }}/stream">The crew</a> · <a href="/p/{{ project.id }}/run">Run and cost</a> · <a href="/p/{{ project.id }}/inbox">Inbox</a>
+      {% if project.confirmed_goals is not none %}· Every night at 23:00 ({{ config.NIGHT_TIMEZONE }}){% endif %}</p>
+  </div>
+</section>
+
+<details class="project-details" {% if confirm_state != "current" %}open{% endif %}>
+  <summary>Project and goals</summary>
+  <article class="card project-card">
+    <p class="eyebrow">Your project</p>
+    <h2>{{ project.card.name }}</h2>
+    {% if project.card.one_liner %}<p class="lede">{{ project.card.one_liner }}</p>{% endif %}
+    {% if project.card.audience %}<p><span class="label">Probably for</span> {{ project.card.audience }}</p>{% endif %}
+    {% if project.card.observations %}<ul class="observations">{% for o in project.card.observations %}<li>{{ o }}</li>{% endfor %}</ul>{% endif %}
+    <p class="source">Read from <a href="{{ project.url }}" rel="noopener noreferrer" target="_blank">{{ project.url }}</a>
+      {% if project.fetch_error %}<br><span class="muted">The page was not readable ({{ project.fetch_error | trim(".") }}). I worked from your description.</span>{% endif %}</p>
+  </article>
+
+  {% if project.proposal_error %}
+  <div class="notice error" role="alert">{{ project.proposal_error }} Your own goals are saved.
+    <form method="post" action="/p/{{ project.id }}/propose" class="inline"><button type="submit">Try again</button></form></div>
+  {% endif %}
+
+  {% include "_goals.html" %}
+</details>
 {% endblock %}

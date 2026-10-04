@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from app import fetcher, main
+from app import fetcher, intake, main
 from app.fetcher import FetchError
 
 from .conftest import make_proposal
@@ -160,7 +160,7 @@ def test_space_in_path_is_encoded_not_rejected():
 
 
 def test_hanging_model_ends_in_visible_retry(client, monkeypatch):
-    monkeypatch.setattr(main, "PROPOSAL_BUDGET_S", 0.5)
+    monkeypatch.setattr(intake, "PROPOSAL_BUDGET_S", 0.5)
 
     def hang(*a):
         time.sleep(2)

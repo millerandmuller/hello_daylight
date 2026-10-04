@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Inbox · Hello Daylight{% endblock %}
+{% block head %}<script src="/static/desk.js" defer></script>{% endblock %}
+{% block content %}
+<p class="muted small"><a href="/p/{{ project.id }}">&larr; This morning</a></p>
+<h1>Inbox</h1>
+<p class="lede">Drafts you signed. Copy one and send it yourself; this app sends nothing.</p>
+{% for c in signed %}
+<article class="opening" id="{{ c.id }}-{{ loop.index }}">
+  <p class="eyebrow">{{ "Question" if c.kind == "question" else "Writer" }} · signed {{ c.signed_at[:10] }}</p>
+  <h2><a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">{{ c.title }}</a></h2>
+  {% if c.contact_route %}<p class="small"><span class="label">Contact route:</span> {{ c.contact_route }}</p>{% endif %}
+  <pre class="draft" id="draft-in-{{ loop.index }}">{{ c.draft }}</pre>
+  <button type="button" class="secondary" data-copy-from="draft-in-{{ loop.index }}">Copy</button>
+</article>
+{% else %}<p class="muted">Nothing signed yet.</p>{% endfor %}
+{% endblock %}

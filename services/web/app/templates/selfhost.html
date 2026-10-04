@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="intake">
+  <h1>Run it yourself</h1>
+  <p class="lede">Hello Daylight is open source. Everything specific to one operator is configuration: no keys, no allowlist and no project ids live in the repository.</p>
+  <ol class="steps">
+    <li>Create a Google Cloud project and a Firebase project on it; switch on Firestore (Native) and Google sign-in.</li>
+    <li>Put your Gemini key and a session secret into Secret Manager.</li>
+    <li>Run <code>deploy/deploy.sh</code> from the repository. It builds one image and sets up the web service, the nightly job and the scheduler.</li>
+    <li>Add your first account to <code>DAYLIGHT_ADMIN_EMAILS</code>, sign in, and add the others on the admin page.</li>
+  </ol>
+  <p>The full steps, with costs and caps, are in <a href="{{ repo_url }}#run-it-yourself" rel="noopener noreferrer">the README</a>.</p>
+</section>
+{% endblock %}

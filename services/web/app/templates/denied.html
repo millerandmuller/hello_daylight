@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{% if status == 401 %}Sign in{% else %}No access{% endif %} · Hello Daylight{% endblock %}
+{% block content %}
+<section class="intake">
+  {% if status == 401 %}
+  <h1>Sign in first.</h1>
+  <p>This part is for signed-in people on the list. <a href="/login">Sign in</a>, or <a href="/try">try it with your own key</a> without an account.</p>
+  {% else %}
+  <h1>No access.</h1>
+  <p>{{ message }} Ask the person who runs this app to add your account, or <a href="/try">try it with your own key</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

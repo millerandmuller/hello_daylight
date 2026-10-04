@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}The crew · Hello Daylight{% endblock %}
+{% block content %}
+<p class="muted small"><a href="/p/{{ project.id }}">&larr; This morning</a></p>
+<h1>The crew</h1>
+{% include "_stream.html" %}
+{% endblock %}

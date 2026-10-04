@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Run and cost · Hello Daylight{% endblock %}
+{% block content %}
+<p class="muted small"><a href="/p/{{ project.id }}">&larr; This morning</a></p>
+<h1>Run and cost</h1>
+{% if run %}
+<p class="status-line"><span class="chip {{ run.status }}">{{ run.status }}</span> {{ run.headline or ("In progress." if run.status == "running" else "Finished.") }}</p>
+{% if run.cost_line %}<p>{{ run.cost_line }}</p>{% endif %}
+{% else %}<p class="muted">No run yet.</p>{% endif %}
+
+<h2>Budgets</h2>
+<ul>
+  <li>Per run: up to {{ "%.2f"|format(contract.budget_eur) }} EUR. When a run would cross it, the run stops cleanly and says so.</li>
+  <li>This month: {{ "%.2f"|format(spent) }} EUR of {{ "%.2f"|format(cap) }} EUR for this project; {{ "%.2f"|format(room) }} EUR left across all caps.</li>
+</ul>
+<form method="post" action="/p/{{ project.id }}/run" class="run-form">
+  <label for="budget">Lower the budget for the next run (EUR)</label>
+  <input id="budget" name="budget" inputmode="decimal" placeholder="{{ '%.2f'|format(contract.budget_eur) }}" class="short">
+  <button type="submit" {% if run_state == "running" %}disabled{% endif %}>Run now with this budget</button>
+</form>
+
+<h2>Ledger</h2>
+<p class="muted small">One line per run, newest first.</p>
+<div class="table-wrap"><table class="ledger">
+  <thead><tr><th>Started</th><th>Trigger</th><th>Status</th><th>Cost</th><th>Calls</th><th>Replaced</th><th>Why it ended</th></tr></thead>
+  <tbody>
+  {% for l in ledger %}
+    <tr><td>{{ l.started_at[:16] | replace("T", " ") }}</td><td>{{ l.trigger }}</td><td>{{ l.status }}</td><td>{{ "%.2f"|format(l.cost_eur) }} EUR</td>
+        <td>{{ l.calls }}</td><td>{{ l.replacements }}</td><td>{{ l.kill_switch or l.reason or "" }}{% if l.resumed_at %} (resumed {{ l.resumed_at | length }}x){% endif %}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">Nothing yet.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

@@ -1,0 +1,8 @@
+.git
+.venv
+.env
+.data
+**/__pycache__
+**/*.pyc
+tools/firebase-auth/node_modules
+services/web/tests

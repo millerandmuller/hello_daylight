@@ -1,0 +1,51 @@
+<div id="cards">
+{% if run and run.cards %}
+  {% for c in run.cards %}
+  <article class="opening {{ c.kind }}" id="{{ c.id }}">
+    <p class="eyebrow">{% if c.kind == "question" %}A question you can answer{% else %}A writer who covers your topic{% endif %}</p>
+    <h2><a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">{{ c.title }}</a></h2>
+    <p class="meta muted small">{{ c.date }}{% if c.date_basis == "text" %} (date found in the page text){% endif %}{% if c.author %} · {{ c.author }}{% endif %} · <a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">Open source</a></p>
+    <p class="why">{{ c.why }}</p>
+    <blockquote>{{ c.quote }}</blockquote>
+    {% if c.kind == "resonance" %}
+      {% if c.contact_route %}<p class="small"><span class="label">Contact route from their own page:</span> {{ c.contact_route }}
+        <a href="{{ c.contact_source_url }}" rel="noopener noreferrer" target="_blank">where it is shown</a></p>
+      {% else %}<p class="small muted">Their page shows no contact route. Use the source link.</p>{% endif %}
+    {% endif %}
+    {% if c.needs_attention %}<p class="notice small">This draft needs a look: {{ c.needs_attention | join("; ") }}.</p>{% endif %}
+
+    <label class="label" for="draft-{{ c.id }}">Draft</label>
+    <pre class="draft" id="draft-{{ c.id }}">{{ c.draft }}</pre>
+
+    <div class="card-actions">
+      {% if c.state == "signed" %}
+        <span class="kept">Signed. It is in your inbox.</span>
+        <button type="button" class="secondary" data-copy-from="draft-{{ c.id }}">Copy again</button>
+        <form method="post" action="/p/{{ project.id }}/cards/{{ c.id }}/unsign" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/unsign" hx-target="#cards" hx-swap="outerHTML" class="inline"><button type="submit" class="link">Undo</button></form>
+      {% else %}
+        <form method="post" action="/p/{{ project.id }}/cards/{{ c.id }}/sign" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/sign" hx-target="#cards" hx-swap="outerHTML" class="inline">
+          <button type="submit" data-copy-from="draft-{{ c.id }}">Sign and copy</button>
+        </form>
+      {% endif %}
+    </div>
+
+    <details class="edit">
+      <summary>Change the draft</summary>
+      <form method="post" action="/p/{{ project.id }}/cards/{{ c.id }}/edit" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/edit" hx-target="#cards" hx-swap="outerHTML">
+        <label class="visually-hidden" for="edit-{{ c.id }}">Your version</label>
+        <textarea id="edit-{{ c.id }}" name="text" rows="9" maxlength="2000">{{ c.draft }}</textarea>
+        <button type="submit" class="secondary">Save my version</button>
+        {% if c.edited %}<span class="muted small">Edited by you. The next night reads the change.</span>{% endif %}
+      </form>
+    </details>
+
+    <form method="post" class="thumbs" action="/p/{{ project.id }}/cards/{{ c.id }}/up">
+      <label class="visually-hidden" for="comment-{{ c.id }}">Comment (optional)</label>
+      <input id="comment-{{ c.id }}" name="comment" maxlength="500" placeholder="Why? One sentence helps the next night." value="{{ c.comment or '' }}">
+      <button type="submit" class="secondary {% if c.thumb == 'up' %}picked{% endif %}" formaction="/p/{{ project.id }}/cards/{{ c.id }}/up" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/up" hx-include="closest form" hx-target="#cards" hx-swap="outerHTML" aria-label="Useful">Useful</button>
+      <button type="submit" class="secondary {% if c.thumb == 'down' %}picked{% endif %}" formaction="/p/{{ project.id }}/cards/{{ c.id }}/down" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/down" hx-include="closest form" hx-target="#cards" hx-swap="outerHTML" aria-label="Not useful">Not useful</button>
+    </form>
+  </article>
+  {% endfor %}
+{% endif %}
+</div>
