@@ -72,7 +72,7 @@ tools/firebase-auth/  source of the one bundled script the sign-in page loads
 
 Tests: `.venv/bin/python -m pytest services/web/tests`
 
-Commands: `python -m app.night --project <id> [--budget 0.05]` starts a run; `python -m app.cli intake|confirm|feedback|show|ledger` for the operator.
+Commands: `python -m app.night --project <id> [--budget 0.05]` starts a run; `python -m app.cli intake|confirm|feedback|show|ledger|pause|delete` for the operator (`delete <id> --yes` removes a workspace with its runs and feedback; its ledger lines stay). A refused start exits 0 and the job never retries itself: a start the platform repeats on its own may only continue an unfinished run, never pay for a new one. A night that failed because the database or the network failed continues from its checkpoint with the next start.
 
 ## Verified how
 

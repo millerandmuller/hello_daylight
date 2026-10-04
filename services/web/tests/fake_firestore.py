@@ -37,7 +37,9 @@ class Ref:
 
     def update(self, data):
         if self.id not in self.col.docs:
-            raise KeyError(self.id)
+            from google.api_core.exceptions import NotFound
+
+            raise NotFound(self.id)  # what the real client raises for an update of a missing document
         self.col.docs[self.id].update(copy.deepcopy(data))
 
     def delete(self):

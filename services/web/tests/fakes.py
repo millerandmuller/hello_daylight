@@ -129,7 +129,7 @@ class FakeGateway:
             return AgentResult(parsed=self.eval_script.get(tid) or Evaluation(score=8, verdict="keep", reason="Good finds.", new_instruction=None))
         if step == "curate":
             ids = self.curate_order or [l.split(" ", 1)[0] for l in user_text.splitlines() if l[:1] == "c" and l.split(" ", 1)[0][1:].isdigit()]
-            return AgentResult(parsed=Curation(picks=[Pick(item_id=i, fit="fits") for i in ids[:5]]))
+            return AgentResult(parsed=Curation(picks=[Pick(item_id=i, relevance=8, fit="fits") for i in ids[:5]]))
         if step == "write":
             return AgentResult(parsed=Draft(text=self.draft_text))
         if step == "critic":

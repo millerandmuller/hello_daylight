@@ -5,12 +5,32 @@ Only the server talks to Firestore (Admin credentials of the Cloud Run service a
 is needed; sorting happens in the server.
 """
 
+import logging
+import random
 import secrets
 import time
 
+from google.api_core import exceptions as gexc
 from google.cloud import firestore
 
 from .repo import NotFound, Repo, check_id, now, now_dt, parse_ts
+
+
+log = logging.getLogger("daylight.firestore")
+_TRANSIENT = (gexc.Aborted, gexc.ServiceUnavailable, gexc.DeadlineExceeded, gexc.ResourceExhausted, gexc.InternalServerError)
+
+
+def _with_backoff(fn, attempts: int = 6):
+    """A write the database turned away for load is tried again after a growing, jittered pause."""
+    for n in range(attempts):
+        try:
+            return fn()
+        except _TRANSIENT as exc:
+            if n == attempts - 1:
+                raise
+            pause = min(4.0, 0.2 * 2**n) * (0.5 + random.random())
+            log.info("firestore busy (%s), trying again in %.1fs", type(exc).__name__, pause)
+            time.sleep(pause)
 
 
 class FirestoreRepo(Repo):
@@ -74,7 +94,15 @@ class FirestoreRepo(Repo):
         return snap.to_dict()
 
     def mutate_run(self, run_id: str, mutate) -> dict:
-        return self._mutate("runs", run_id, mutate)
+        return _with_backoff(lambda: self._mutate("runs", run_id, mutate))
+
+    def patch_run(self, run_id: str, patch: dict) -> None:
+        # a plain field update: no read, no transaction, nothing for parallel writers to collide on
+        ref = self._ref("runs", run_id)
+        try:
+            _with_backoff(lambda: ref.update({**patch, "updated_at": now()}))
+        except gexc.NotFound as exc:
+            raise NotFound(run_id) from exc
 
     def list_runs(self, project_id: str, limit: int = 10) -> list[dict]:
         q = self.db.collection("runs").where(filter=firestore.FieldFilter("project_id", "==", project_id))
@@ -83,7 +111,8 @@ class FirestoreRepo(Repo):
         return runs[:limit]
 
     def save_checkpoint(self, run_id: str, data: dict) -> None:
-        self._ref("checkpoints", run_id).set(data)
+        ref = self._ref("checkpoints", run_id)
+        _with_backoff(lambda: ref.set(data))
 
     def load_checkpoint(self, run_id: str) -> dict | None:
         snap = self._ref("checkpoints", run_id).get()
@@ -120,7 +149,7 @@ class FirestoreRepo(Repo):
             transaction.update(ref, {"heartbeat_at": now()})
             return True
 
-        return txn(self.db.transaction())
+        return _with_backoff(lambda: txn(self.db.transaction()))
 
     def release_lock(self, project_id: str, run_id: str) -> None:
         ref = self._ref("locks", project_id)
@@ -132,6 +161,19 @@ class FirestoreRepo(Repo):
                 transaction.delete(ref)
 
         txn(self.db.transaction())
+
+    def delete_project(self, project_id: str) -> int:
+        removed = 0
+        for col in ("runs", "feedback"):
+            for snap in self.db.collection(col).where(filter=firestore.FieldFilter("project_id", "==", project_id)).stream():
+                if col == "runs":
+                    self._ref("checkpoints", snap.id).delete()
+                snap.reference.delete()
+                removed += 1
+        for col in ("locks", "projects"):
+            self._ref(col, project_id).delete()
+            removed += 1
+        return removed
 
     # --- feedback ----------------------------------------------------------------------------
     def add_feedback(self, project_id: str, fb: dict) -> str:
@@ -156,7 +198,8 @@ class FirestoreRepo(Repo):
     # --- ledger ------------------------------------------------------------------------------
     def append_ledger(self, line: dict) -> None:
         month = str(line.get("started_at", ""))[:7]
-        self.db.collection("ledger").document().set({**line, "month": month})
+        ref = self.db.collection("ledger").document()  # the id is fixed before the first try, so a retry never writes a line twice
+        _with_backoff(lambda: ref.set({**line, "month": month}))
 
     def ledger(self, project_id: str | None = None, limit: int = 100) -> list[dict]:
         q = self.db.collection("ledger")

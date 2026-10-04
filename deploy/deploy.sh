@@ -62,19 +62,31 @@ COMMON_ENV="DAYLIGHT_BACKEND=firestore,DAYLIGHT_AUTH_MODE=firebase,DAYLIGHT_ADMI
 COMMON_SECRETS="GEMINI_API_KEY=daylight-gemini-key:latest,DAYLIGHT_SESSION_SECRET=daylight-session-secret:latest"
 
 echo "==> the nightly job (no retries of its own: a dead run is resumed by the next start, never paid twice)"
+# --max-retries=0: a platform retry of a refused or failed start would be a second paid run. The app also guards
+# against it (a retry may only resume), but the platform should not try in the first place.
 gcloud run jobs deploy "${JOB}" --image="${IMAGE}" --region="${REGION}" --service-account="${RUN_SA}" \
-  --command=python --args="-m,app.night,--wait-stale" --max-retries=1 --task-timeout=1800s --cpu=1 --memory=1Gi \
+  --command=python --args="-m,app.night,--wait-stale" --max-retries=0 --task-timeout=1800s --cpu=1 --memory=1Gi \
   --set-env-vars="${COMMON_ENV}" --set-secrets="${COMMON_SECRETS}"
 
 echo "==> the web service (scales to zero, no minimum instance, two instances at most)"
 gcloud run deploy "${SERVICE}" --image="${IMAGE}" --region="${REGION}" --service-account="${RUN_SA}" --allow-unauthenticated \
   --min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=900 --concurrency=20 \
   --set-env-vars="${COMMON_ENV},DAYLIGHT_LAUNCHER=cloudrun,DAYLIGHT_CLOUD_RUN_JOB=${JOB_NAME}" --set-secrets="${COMMON_SECRETS}"
+# --max-instances caps each revision; the service-level cap (default 20) is a separate setting
+gcloud run services update "${SERVICE}" --region="${REGION}" --max=2 >/dev/null
 
 echo "==> the schedule: ${NIGHT_CRON} (${TIMEZONE})"
-gcloud scheduler jobs create http daylight-night --location="${REGION}" --schedule="${NIGHT_CRON}" --time-zone="${TIMEZONE}" \
-  --uri="https://run.googleapis.com/v2/${JOB_NAME}:run" --http-method=POST --oauth-service-account-email="${SCHED_SA}" \
-  --attempt-deadline=180s 2>/dev/null || gcloud scheduler jobs update http daylight-night --location="${REGION}" --schedule="${NIGHT_CRON}" --time-zone="${TIMEZONE}"
+# Create and update pass the SAME target, so running this script again repairs a wrong one. Spelled out in one
+# variable: in zsh "${JOB_NAME}:r" is a path modifier and silently eats the ":r" of ":run".
+RUN_URI="https://run.googleapis.com/v2/${JOB_NAME}"':run'
+SCHED_ARGS=(--location="${REGION}" --schedule="${NIGHT_CRON}" --time-zone="${TIMEZONE}" --uri="${RUN_URI}" --http-method=POST
+  --oauth-service-account-email="${SCHED_SA}" --attempt-deadline=180s)
+gcloud scheduler jobs create http daylight-night "${SCHED_ARGS[@]}" 2>/dev/null || gcloud scheduler jobs update http daylight-night "${SCHED_ARGS[@]}"
+ACTUAL_URI="$(gcloud scheduler jobs describe daylight-night --location="${REGION}" --format='value(httpTarget.uri)')"
+if [ "${ACTUAL_URI}" != "${RUN_URI}" ]; then
+  echo "!! the schedule points at '${ACTUAL_URI}', expected '${RUN_URI}': the night run would never start" >&2
+  exit 1
+fi
 
 if [ -n "${BILLING_ACCOUNT:-}" ]; then
   echo "==> budget alarm at 20 EUR a month (an alarm, not a stop: the real stop is the run budget and the monthly caps in the app)"

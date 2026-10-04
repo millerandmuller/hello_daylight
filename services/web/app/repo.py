@@ -80,6 +80,11 @@ class Repo(ABC):
     @abstractmethod
     def mutate_run(self, run_id: str, mutate: Mutate) -> dict: ...
 
+    def patch_run(self, run_id: str, patch: dict) -> None:
+        """Set top-level fields of a run, without reading it first. The engine writes its view this way: it always
+        writes the whole state of a field, so the last write wins and no transaction is needed."""
+        self.mutate_run(run_id, lambda d: d.update(patch))
+
     @abstractmethod
     def list_runs(self, project_id: str, limit: int = 10) -> list[dict]: ...
 
@@ -104,6 +109,11 @@ class Repo(ABC):
     # --- feedback ----------------------------------------------------------------------------
     @abstractmethod
     def add_feedback(self, project_id: str, fb: dict) -> str: ...
+
+    @abstractmethod
+    def delete_project(self, project_id: str) -> int:
+        """Remove a workspace with its runs, checkpoints, feedback and lock. Ledger lines stay: they are the
+        accounting of money already spent. Returns how many documents were removed."""
 
     @abstractmethod
     def list_feedback(self, project_id: str, unconsumed_only: bool = False) -> list[dict]: ...
@@ -298,6 +308,21 @@ class FileRepo(Repo):
             cur = self._read(path)
             if cur and cur.get("run_id") == run_id:
                 path.unlink(missing_ok=True)
+
+    def delete_project(self, project_id: str) -> int:
+        removed = 0
+        with self._locked():
+            for run in self.list_runs(project_id, 10_000):
+                for sub in ("runs", "checkpoints"):
+                    path = self._doc(sub, run["run_id"])
+                    if path.exists():
+                        path.unlink()
+                        removed += 1
+            for path in (self._doc("projects", project_id), self._doc("locks", project_id), self._fb_path(project_id)):
+                if path.exists():
+                    path.unlink()
+                    removed += 1
+        return removed
 
     # --- feedback ----------------------------------------------------------------------------
     def _fb_path(self, project_id: str) -> Path:

@@ -84,6 +84,7 @@ class RunMeter:
                 "replacements": self.replacements,
                 "search_queries": self.search_queries,
                 "spent_eur": round(self.spent_eur, 6),
+                "in_flight_eur": round(self.reserved_eur, 6),  # calls under way: if the process dies now, this is what may have been spent
             }
 
     def _load(self, state: dict) -> None:
@@ -101,6 +102,17 @@ class RunMeter:
         self.replacements = int(state.get("replacements", 0))
         self.search_queries = int(state.get("search_queries", 0))
         self.spent_eur = float(state.get("spent_eur", 0.0))
+
+    def book_lost_in_flight(self, state: dict) -> float:
+        """After a hard kill: the calls that were under way at the last checkpoint were probably paid. Count their
+        estimate as spent, so the ledger never shows less than the run cost. Returns what was added."""
+        lost = float(state.get("in_flight_eur", 0.0) or 0.0)
+        if lost > 0:
+            with self._lock:
+                self.spent_eur += lost
+                st = self.steps.setdefault("lost_at_abort", StepStat(model="estimate"))
+                st.cost_eur = round(st.cost_eur + lost, 6)
+        return lost
 
     # --- the gates ---------------------------------------------------------------------------
     def stop(self, reason: str, detail: str = "") -> None:

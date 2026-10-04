@@ -5,6 +5,8 @@
     python -m app.cli feedback <project-id> <card-id> up|down [--comment "..."]
     python -m app.cli show <project-id>            the last run: crew, cards, cost line
     python -m app.cli ledger [--project <id>]      ledger lines, newest first
+    python -m app.cli pause <project-id>           no more night runs for this workspace (unpause: the same with --off)
+    python -m app.cli delete <project-id> --yes    remove the workspace, its runs and feedback; ledger lines stay
     python -m app.night --project <project-id>     start a run (see night.py)
 
 The owner of a workspace made here is `cli@local` unless --owner is given.
@@ -89,6 +91,27 @@ def cmd_ledger(args) -> int:
     return 0
 
 
+def cmd_pause(args) -> int:
+    repo, _ = _repo_and_store()
+    repo.update_project(args.project, lambda d: d.update(nightly=bool(args.off)))
+    print("night runs " + ("on" if args.off else "paused") + f" for {args.project}")
+    return 0
+
+
+def cmd_delete(args) -> int:
+    repo, _ = _repo_and_store()
+    project = repo.get_project(args.project)
+    running = [r for r in repo.list_runs(args.project, 1) if r.get("status") == "running"]
+    if running:
+        print("error: a run of this workspace is in progress; cancel it first")
+        return 2
+    if not args.yes:
+        print(f"would delete workspace {args.project} ({project.get('url', '')}, owner {project.get('owner')}); add --yes to do it")
+        return 1
+    print(json.dumps({"deleted": args.project, "documents": repo.delete_project(args.project)}))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -106,6 +129,12 @@ def main(argv=None) -> int:
     p.add_argument("--comment")
     p = sub.add_parser("show")
     p.add_argument("project")
+    p = sub.add_parser("pause")
+    p.add_argument("project")
+    p.add_argument("--off", action="store_true", help="switch night runs back on")
+    p = sub.add_parser("delete")
+    p.add_argument("project")
+    p.add_argument("--yes", action="store_true")
     p = sub.add_parser("ledger")
     p.add_argument("--project")
     p.add_argument("--limit", type=int, default=20)
@@ -113,7 +142,7 @@ def main(argv=None) -> int:
     logsafe.install()
     if args.cmd == "intake":
         return asyncio.run(cmd_intake(args))
-    return {"confirm": cmd_confirm, "feedback": cmd_feedback, "show": cmd_show, "ledger": cmd_ledger}[args.cmd](args)
+    return {"confirm": cmd_confirm, "feedback": cmd_feedback, "show": cmd_show, "ledger": cmd_ledger, "pause": cmd_pause, "delete": cmd_delete}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from . import config
 from .engine import NightRun, ProjectInput
 from .evidence import canonical_url
-from .repo import NotFound, Repo, now, now_precise
+from .repo import NotFound, Repo, now, now_precise, parse_ts
 from .runio import MemoryRunIO, RepoRunIO
 
 log = logging.getLogger("daylight.service")
@@ -90,6 +90,23 @@ def month_room(repo: Repo, project: dict) -> tuple[float, str | None]:
     return room_ws, "month_cap"
 
 
+RESUME_FAILED_WITHIN_H = 18
+
+
+def resumable_run(latest: dict | None) -> str | None:
+    """The run a start should continue instead of beginning a new one: a run that is still marked running (its
+    process may have died), or a recent run that failed for a reason worth retrying (storage, network)."""
+    if not latest:
+        return None
+    if latest.get("status") == "running":
+        return latest["run_id"]
+    started = parse_ts(latest.get("started_at"))
+    recent = started is not None and datetime.now(timezone.utc) - started < timedelta(hours=RESUME_FAILED_WITHIN_H)
+    if latest.get("status") == "failed" and latest.get("resumable") and recent:
+        return latest["run_id"]
+    return None
+
+
 def _refusal_ledger(repo: Repo, project_id: str, trigger: str, reason: str, message: str) -> None:
     repo.append_ledger(
         {"run_id": uuid.uuid4().hex[:16], "project_id": project_id, "mode": "private", "trigger": trigger, "status": "refused", "reason": reason,
@@ -106,12 +123,16 @@ async def run_private(
     budget_override: float | None = None,
     wait_stale: bool = False,
     takeover: bool = False,
+    resume_only: bool = False,
     emit=None,
     api_key: str | None = None,
     http=None,
     gateway=None,
 ) -> dict:
-    """One private run of one project. Raises RunRefused before any money is spent when a gate says no."""
+    """One private run of one project. Raises RunRefused before any money is spent when a gate says no.
+
+    resume_only: this start was not asked for by anyone (a platform retry). It may continue an unfinished run, never
+    begin a new one, so one request can never pay for two runs."""
     key = api_key or config.operator_key()
     if not key and gateway is None:
         raise RunRefused("no_key", "No operator key is configured.")
@@ -134,7 +155,10 @@ async def run_private(
     waited = False
     while True:
         latest = (await asyncio.to_thread(repo.list_runs, project_id, 1))
-        candidate = latest[0]["run_id"] if latest and latest[0].get("status") == "running" else None
+        candidate = resumable_run(latest[0] if latest else None)
+        if candidate is None and resume_only:
+            await asyncio.to_thread(_refusal_ledger, repo, project_id, trigger, "nothing_to_resume", "A retry found no unfinished run to continue and started nothing.")
+            raise RunRefused("nothing_to_resume", "A retry found no unfinished run to continue and started nothing.")
         run_id = candidate or uuid.uuid4().hex[:16]
         ttl = 0.0 if takeover else contract.lock_ttl_s
         got = await asyncio.to_thread(repo.acquire_lock, project_id, run_id, ttl)
@@ -156,6 +180,10 @@ async def run_private(
             repo.create_run,
             {"run_id": run_id, "project_id": project_id, "owner": project.get("owner"), "trigger": trigger, "mode": "private",
              "status": "running", "started_at": now_precise(), "cards": [], "plan_view": [], "feedback_note": "", "notes": [], "cancel_requested": False},
+        )
+    else:  # continuing: a failed run is at work again, and its old verdict must not stay on the desk
+        await asyncio.to_thread(
+            repo.patch_run, run_id, {"status": "running", "reason": "", "headline": "", "resumable": False, "cancel_requested": False}
         )
     pinput = await asyncio.to_thread(build_project_input, repo, project)
     io = RepoRunIO(repo, project_id, run_id, emit_cb=emit)

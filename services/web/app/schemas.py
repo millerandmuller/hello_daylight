@@ -43,6 +43,10 @@ class Evaluation(BaseModel):
 
 class Pick(BaseModel):
     item_id: str
+    relevance: int = Field(
+        description="0 to 10: how directly this opening serves the owner's goals for THIS project. 0-3: another topic, or the author "
+        "wants the same thing the owner wants (also looking for testers or users). 7+: the project plainly answers it or the writer covers its topic."
+    )
     fit: str = Field(description="One sentence: why this one is among the best five for the goals.")
 
 

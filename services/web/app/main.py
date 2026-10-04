@@ -133,6 +133,7 @@ async def auth_session(request: Request, body: SessionIn):
 
 @app.post("/auth/logout")
 async def auth_logout(request: Request):
+    auth.check_same_origin(request)  # another site must not be able to sign the user out
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie(auth.COOKIE, path="/")
     return resp
@@ -388,7 +389,7 @@ def run_cancel(request: Request, token: str):
         return _not_found(request)
     run = _latest_run(project)
     if run and run.get("status") == "running":
-        repo().mutate_run(run["run_id"], lambda d: d.update(cancel_requested=True))
+        repo().patch_run(run["run_id"], {"cancel_requested": True})
     return RedirectResponse(f"/p/{token}/stream", status_code=303)
 
 
@@ -501,7 +502,7 @@ def admin_budget(request: Request, global_cap_eur: str = Form("")):
 def admin_cancel(request: Request, run_id: str = Form("")):
     auth.require_admin(user_of(request))
     try:
-        repo().mutate_run(run_id, lambda d: d.update(cancel_requested=True))
+        repo().patch_run(run_id, {"cancel_requested": True})
     except NotFound:
         pass
     return RedirectResponse("/admin", status_code=303)

@@ -68,6 +68,9 @@ CURATE_INSTRUCTION = """You are the curator. Choose the best {n} openings from t
 - Prefer fit with the goals, recency, and variety (different sources, different people).
 - At least one must be a 'resonance' opening if any resonance finding exists.
 - Never choose two findings by the same author or from the same page.
+- Rate each pick's relevance honestly. A post on another topic is off-topic even when a word matches. A person asking for
+  the same thing the owner wants (also looking for testers, users or feedback) is not an opening for this owner.
+- Choose fewer than {n} when fewer fit. An empty slot is better than a card that would embarrass the owner.
 - Use only item_id values from the list. {voice} {untrusted}"""
 
 WRITE_QUESTION = """You write a reply draft for an indie builder to post under a public question.

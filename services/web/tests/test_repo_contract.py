@@ -110,3 +110,30 @@ def test_public_slots_are_counted_released_and_expire(store):
     assert store.acquire_slot(3, 60) is not None
     time.sleep(0.05)
     assert store.acquire_slot(1, 0.01) is not None, "expired slots do not block"
+
+
+def test_patch_run_sets_fields_without_a_read_and_a_missing_run_is_not_found(store):
+    store.create_run({"run_id": "run-p-0001", "project_id": "p1", "status": "running", "started_at": "2026-10-04T00:00:00+00:00", "cards": []})
+    store.patch_run("run-p-0001", {"plan_view": [{"id": "t1"}], "cancel_requested": True})
+    doc = store.get_run("run-p-0001")
+    assert doc["plan_view"] == [{"id": "t1"}] and doc["cancel_requested"] is True and doc["status"] == "running"
+    with pytest.raises(NotFound):
+        store.patch_run("run-p-none", {"status": "x"})
+
+
+def test_delete_project_removes_runs_checkpoints_feedback_and_lock_but_keeps_the_ledger(store):
+    pid = store.create_project("a@x.example", {"url": "https://a.example", "goals": []})
+    other = store.create_project("b@x.example", {"url": "https://b.example", "goals": []})
+    store.create_run({"run_id": "run-d-0001", "project_id": pid, "status": "ok", "started_at": "2026-10-04T00:00:00+00:00", "cards": []})
+    store.create_run({"run_id": "run-d-0002", "project_id": other, "status": "ok", "started_at": "2026-10-04T00:00:00+00:00", "cards": []})
+    store.save_checkpoint("run-d-0001", {"stage": "plan"})
+    store.add_feedback(pid, {"kind": "up"})
+    store.acquire_lock(pid, "run-d-0001", 90)
+    store.append_ledger({"run_id": "run-d-0001", "project_id": pid, "started_at": "2026-10-04T00:00:00+00:00", "cost_eur": 0.1})
+    assert store.delete_project(pid) >= 4
+    with pytest.raises(NotFound):
+        store.get_project(pid)
+    assert store.list_runs(pid) == [] and store.load_checkpoint("run-d-0001") is None and store.list_feedback(pid) == []
+    assert store.acquire_lock(pid, "run-d-0003", 90)["acquired"], "the lock went with the workspace"
+    assert [r["run_id"] for r in store.list_runs(other)] == ["run-d-0002"], "other workspaces are untouched"
+    assert store.month_spend(pid, "2026-10") == pytest.approx(0.1), "the accounting stays"

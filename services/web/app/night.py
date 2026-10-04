@@ -6,12 +6,17 @@
 
 Starting twice is safe: a second start of the same workspace is refused while the first one is alive, and a run
 that died is resumed from its checkpoint.
+
+Exit codes: a refusal is a decision, not a failure, so it exits 0. Only a run that failed exits 1. If the platform
+retries the job anyway (Cloud Run sets CLOUD_RUN_TASK_ATTEMPT > 0), the retry may only resume an unfinished run of the
+same workspace; it never starts a fresh, paid one.
 """
 
 import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -31,8 +36,19 @@ def _recent_run(repo, project_id: str) -> bool:
     return False
 
 
+def platform_retry() -> bool:
+    """True when this process is a retry the platform started on its own, not a start somebody asked for."""
+    try:
+        return int(os.environ.get("CLOUD_RUN_TASK_ATTEMPT", "0") or 0) > 0
+    except ValueError:
+        return False
+
+
 async def night(args) -> int:
     repo = open_repo()
+    resume_only = platform_retry()
+    if resume_only:
+        log.warning("platform retry: this attempt may only resume an unfinished run, never start a new one")
     projects = [repo.get_project(args.project)] if args.project else [p for p in repo.list_projects() if p.get("confirmed_goals") is not None and p.get("nightly", True)]
     code = 0
     for project in projects:
@@ -42,14 +58,13 @@ async def night(args) -> int:
             continue
         try:
             ledger = await run_private(
-                repo, pid, trigger=args.trigger, budget_override=args.budget, wait_stale=args.wait_stale, takeover=args.takeover
+                repo, pid, trigger=args.trigger, budget_override=args.budget, wait_stale=args.wait_stale, takeover=args.takeover, resume_only=resume_only
             )
         except RunRefused as exc:
             print(json.dumps({"project_id": pid, "refused": exc.reason, "message": exc.message}))
             if exc.reason in ("global_cap", "no_key"):
                 break  # every further run would be refused for the same reason
-            code = code or 3
-            continue
+            continue  # a refusal exits 0: a non-zero exit would make the platform retry, and a retry must never pay twice
         print(json.dumps({k: ledger[k] for k in ("run_id", "project_id", "status", "reason", "cost_eur", "calls", "cards")}))
         if ledger["status"] in ("failed",):
             code = 1

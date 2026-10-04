@@ -28,7 +28,10 @@ from .web import SafeHttp
 log = logging.getLogger("daylight.engine")
 
 HEARTBEAT_S = 8.0
+SPEND_CHECK_S = 1.0  # money spent since the last checkpoint is saved within a second, so a hard kill loses (almost) none of it
+MAX_RESUMES = 3  # a run that failed for an infrastructure reason may be resumed this often, then it stays failed
 WEAK_SCORE = 4
+RELEVANCE_FLOOR = 6  # a curated pick below this does not become a card: fewer cards with a reason beat an embarrassing one
 
 
 class PlanFailed(Exception):
@@ -104,6 +107,26 @@ def _brief_items(items: list[dict], limit: int = 4) -> str:
     return "\n".join(lines) or "(nothing verified)"
 
 
+def describe_crash(exc: BaseException) -> tuple[str, bool]:
+    """-> (reason the owner reads, resumable). Trouble with storage or the network is worth resuming from the
+    checkpoint; a fault in our own code would fail again at the same place, so it is not."""
+    chain, seen = [], set()
+    e: BaseException | None = exc
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        chain.append(e)
+        e = e.__cause__ or e.__context__
+    for e in chain:
+        mod = type(e).__module__ or ""
+        text = str(e)
+        if mod.startswith(("google.api_core", "google.cloud", "grpc")) or "Failed to commit transaction" in text:
+            what = "too many writes at once" if ("contention" in text or "commit transaction" in text or type(e).__name__ == "Aborted") else type(e).__name__
+            return f"storage error: the database did not accept a write ({what})", True
+        if isinstance(e, (ConnectionError, TimeoutError)):
+            return f"network error: {type(e).__name__}", True
+    return f"internal error: {type(exc).__name__}", False
+
+
 class NightRun:
     def __init__(
         self,
@@ -133,6 +156,8 @@ class NightRun:
         self.resumed_at: list[str] = []
         self.notes: set[str] = set()
         self._save_lock = asyncio.Lock()
+        self._view_lock = asyncio.Lock()
+        self._booked_eur = 0.0  # cost an earlier, failed attempt of this run already wrote to the ledger
         self.today = datetime.now(timezone.utc).date()
         self.vc: VerifyContext | None = None
 
@@ -166,8 +191,15 @@ class NightRun:
         return out
 
     async def _flush_view(self, **extra) -> None:
-        patch = {"plan_view": self._plan_view(), "feedback_note": self.S.get("feedback_note", ""), "notes": sorted(self.notes), "cards": self.S.get("cards", []), **extra}
-        await self.io.view(patch)
+        """The view is a picture of the checkpoint for the morning desk. Flushes go one at a time (six scouts writing the
+        same document at once is what made the database give up), and a write that still fails costs the picture one
+        refresh, never the run: the next flush carries the whole state again."""
+        async with self._view_lock:
+            patch = {"plan_view": self._plan_view(), "feedback_note": self.S.get("feedback_note", ""), "notes": sorted(self.notes), "cards": self.S.get("cards", []), **extra}
+            try:
+                await self.io.view(patch)
+            except Exception as exc:  # noqa: BLE001 - degrade: the view is display, the checkpoint is the truth
+                log.warning("view update skipped: %s", type(exc).__name__)
 
     def _event(self, kind: str, **data) -> None:
         self.io.emit({"type": kind, **data})
@@ -175,7 +207,14 @@ class NightRun:
     async def _heartbeat(self) -> None:
         try:
             while True:
-                await asyncio.sleep(HEARTBEAT_S)
+                waited, saved_at = 0.0, self.meter.spent_eur
+                while waited < HEARTBEAT_S:
+                    step = min(SPEND_CHECK_S, HEARTBEAT_S - waited)
+                    await asyncio.sleep(step)
+                    waited += step
+                    if self.meter.spent_eur != saved_at:
+                        saved_at = self.meter.spent_eur
+                        await self._checkpoint()
                 ours, cancel = await self.io.beat()
                 if not ours:
                     self.meter.stop("cancelled", "another process took over this run")
@@ -223,9 +262,14 @@ class NightRun:
             self.started_at = cp.get("started_at", self.started_at)
             self.resumed_at = list(cp.get("resumed_at", [])) + [_now()]
             self.S["resumed_at"] = self.resumed_at
-            for t in self.S.get("tasks", {}).values():  # a task that was running when the process died is pending again
-                if t["status"] in ("running", "replacing"):
-                    t["status"] = "pending"
+            self._booked_eur = float(cp.get("booked_eur", 0.0) or 0.0)
+            lost = self.meter.book_lost_in_flight(cp.get("meter") or {})
+            if lost:
+                self.notes.add(f"{lost:.4f} EUR of calls under way at the abort counted as spent (estimate)")
+            again = ("running", "replacing", "stopped", "not_started") if self.S.pop("resumable", False) else ("running", "replacing")
+            for t in self.S.get("tasks", {}).values():  # a task that was running when the process died (or failed) is pending again
+                if t["status"] in again:
+                    t["status"], t["reason"] = "pending", ""
         else:
             self.S = {"run_id": self.run_id, "started_at": self.started_at, "stage": "plan", "tasks": {}, "cards": [], "picks": None}
         self.vc = self._verify_context()
@@ -253,7 +297,9 @@ class NightRun:
             status, reason = "failed", f"model: {exc.reason}"
         except Exception as exc:  # noqa: BLE001 - a run never ends in a bare traceback; it ends with a reason
             log.exception("run crashed")
-            status, reason = "failed", f"internal error: {type(exc).__name__}"
+            reason, resumable = describe_crash(exc)
+            status = "failed"
+            self.S["resumable"] = resumable and len(self.resumed_at) < MAX_RESUMES and self.io.persistent
         finally:
             beat.cancel()
             try:
@@ -517,23 +563,31 @@ class NightRun:
             return
         by_id = {i["item_id"]: i for i in items}
         picks: list[str] = []
-        if len(items) > c.max_cards:
-            instruction = prompts.CURATE_INSTRUCTION.format(n=c.max_cards, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
-            listing = "\n".join(f"{i['item_id']} [{i['kind']}] {i['title'][:90]} | {i['source']} | {i['date']} | author: {i['author'] or '-'} | {i['why'][:140]}" for i in items)
-            user = f"{self._project_text()}\n\nFeedback:\n{self._feedback_text()}\n\nVerified findings:\n{untrusted_block('FINDINGS', listing)}"
-            try:
-                res = await self.gateway.run_agent(step="curate", tier="mid", name="curator", instruction=instruction, user_text=user, output_schema=Curation, deadline_s=120, max_model_calls=2)
-                picks = [p.item_id for p in res.parsed.picks if p.item_id in by_id]
-            except CallFailed:
-                self.notes.add("curation fell back to the best-scored findings")
+        curated = False
+        # the curator judges relevance even when there are only a few findings: passing the checks is not a fit
+        instruction = prompts.CURATE_INSTRUCTION.format(n=c.max_cards, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
+        listing = "\n".join(f"{i['item_id']} [{i['kind']}] {i['title'][:90]} | {i['source']} | {i['date']} | author: {i['author'] or '-'} | {i['why'][:140]}" for i in items)
+        user = f"{self._project_text()}\n\nFeedback:\n{self._feedback_text()}\n\nVerified findings:\n{untrusted_block('FINDINGS', listing)}"
+        try:
+            res = await self.gateway.run_agent(step="curate", tier="mid", name="curator", instruction=instruction, user_text=user, output_schema=Curation, deadline_s=120, max_model_calls=2)
+            valid = [p for p in res.parsed.picks if p.item_id in by_id]
+            low = [p for p in valid if p.relevance < RELEVANCE_FLOOR]
+            picks = [p.item_id for p in valid if p.relevance >= RELEVANCE_FLOOR]
+            curated = True
+            self.S["off_topic"] = len(low)
+            if low:
+                self.notes.add(f"{len(low)} finding(s) left out as not close enough to the goals")
+        except CallFailed:
+            self.notes.add("curation fell back to the best-scored findings")
         picks = list(dict.fromkeys(picks))
-        picks = self._enforce_picks(picks, items, c.max_cards)
+        picks = self._enforce_picks(picks, items, c.max_cards, fill=not curated)
         self.S["picks"] = [by_id[i] for i in picks]
         await self._checkpoint()
 
     @staticmethod
-    def _enforce_picks(picks: list[str], items: list[dict], n: int) -> list[str]:
-        """Code has the last word: at most n, no author or page twice, at least one resonance if one exists."""
+    def _enforce_picks(picks: list[str], items: list[dict], n: int, fill: bool = True) -> list[str]:
+        """Code has the last word: at most n, no author or page twice, at least one resonance if one exists among the
+        candidates. fill=False (the curator answered): only its relevant picks are candidates, nothing is topped up."""
         by_id = {i["item_id"]: i for i in items}
         chosen, authors, urls = [], set(), set()
 
@@ -541,7 +595,8 @@ class NightRun:
             a = (it["author"] or "").lower() if it["kind"] == "resonance" else ""
             return it["url"] not in urls and not (a and a in authors)
 
-        for iid in picks + [i["item_id"] for i in items]:
+        pool = picks + [i["item_id"] for i in items] if fill else list(picks)
+        for iid in pool:
             it = by_id[iid]
             if iid in chosen or not ok(it):
                 continue
@@ -552,7 +607,7 @@ class NightRun:
             if len(chosen) >= n:
                 break
         if not any(by_id[i]["kind"] == "resonance" for i in chosen):
-            extra = next((i for i in items if i["kind"] == "resonance" and ok(i)), None)
+            extra = next((by_id[i] for i in pool if by_id[i]["kind"] == "resonance" and ok(by_id[i])), None)
             if extra:
                 if len(chosen) >= n:
                     chosen.pop()
@@ -661,6 +716,8 @@ class NightRun:
             headline = REASON_TEXT[reason]
         elif status == "cancelled":
             headline = REASON_TEXT["cancelled"]
+        elif status == "failed" and self.S.get("resumable"):
+            headline = f"This night stopped early: {reason}. The next start continues where it stopped, without paying again for what is done."
         elif status == "failed":
             headline = f"This night did not run: {reason}."
         elif status == "partial" and not self.S.get("cards"):
@@ -672,6 +729,9 @@ class NightRun:
         else:
             headline = ""
         cost_line = f"Cost of this run: {m['cost_eur']:.2f} EUR of {m['budget_eur']:.2f} EUR, {m['calls']} model calls."
+        # A resumed run that failed before already booked part of its cost: this line books only the rest, so the
+        # monthly sums count every euro once. cost_total_eur is what the whole run cost.
+        booked = self._booked_eur
         ledger = {
             "run_id": self.run_id,
             "project_id": self.p.project_id,
@@ -683,7 +743,9 @@ class NightRun:
             "started_at": self.started_at,
             "ended_at": ended,
             "resumed_at": self.resumed_at,
-            "cost_eur": m["cost_eur"],
+            "cost_eur": round(max(0.0, m["cost_eur"] - booked), 6),
+            "cost_total_eur": m["cost_eur"],
+            "booked_before_eur": booked,
             "budget_eur": m["budget_eur"],
             "calls": m["calls"],
             "retries": m["retries"],
@@ -711,8 +773,16 @@ class NightRun:
             "cards": self.S.get("cards", []),
             "notes": sorted(self.notes),
             "unfinished": self._unfinished() if incomplete else [],
+            "resumable": bool(status == "failed" and self.S.get("resumable")),
             "ledger": ledger,
         }
+        if status == "failed" and self.S.get("resumable"):
+            # the checkpoint a resume starts from: it knows what is already booked
+            self.S["booked_eur"] = m["cost_eur"]
+            try:
+                await self._checkpoint()
+            except Exception:  # noqa: BLE001 - without a checkpoint the run simply is not resumable
+                self.S["resumable"] = run_patch["resumable"] = False
         card_urls = [c["url"] for c in self.S.get("cards", [])]
         authors = {(c["author"] or "").lower(): ended[:10] for c in self.S.get("cards", []) if c["kind"] == "resonance" and c["author"]}
         fb_ids = [f["id"] for f in self.p.feedback if f.get("id")]
@@ -746,6 +816,8 @@ class NightRun:
         top = sorted(reasons.items(), key=lambda kv: -kv[1])[:2]
         missing = len([t for t in self.S.get("tasks", {}).values() if t["status"] == "missing"])
         parts = [f"{count} dropped because {why}" for why, count in top]
+        if self.S.get("off_topic"):
+            parts.append(f"{self.S['off_topic']} left out as not close enough to your goals")
         if missing:
             parts.append(f"{missing} scout(s) did not finish")
         found = len(self._all_items())

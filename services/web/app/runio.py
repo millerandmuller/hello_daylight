@@ -20,7 +20,7 @@ class RepoRunIO(RunIO):
         await asyncio.to_thread(self.repo.save_checkpoint, self.run_id, state)
 
     async def view(self, patch: dict) -> None:
-        await asyncio.to_thread(self.repo.mutate_run, self.run_id, lambda d: d.update(patch))
+        await asyncio.to_thread(self.repo.patch_run, self.run_id, patch)
 
     async def beat(self) -> tuple[bool, bool]:
         ours = await asyncio.to_thread(self.repo.heartbeat, self.project_id, self.run_id)
@@ -29,7 +29,7 @@ class RepoRunIO(RunIO):
 
     async def finish(self, run_patch: dict, ledger_line: dict, project_patch) -> None:
         def work():
-            self.repo.mutate_run(self.run_id, lambda d: d.update(run_patch))
+            self.repo.patch_run(self.run_id, run_patch)
             self.repo.append_ledger(ledger_line)
             if project_patch is not None:
                 self.repo.update_project(self.project_id, project_patch)

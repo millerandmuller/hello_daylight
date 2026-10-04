@@ -11,13 +11,27 @@ def scrub(text: str) -> str:
     return _BEARER_RE.sub(lambda m: f"{m.group(1)} [removed]", _KEY_RE.sub("[key removed]", text))
 
 
+def scrub_record(record: logging.LogRecord) -> None:
+    """Remove keys from a record and keep its shape: formatters like uvicorn's access log unpack record.args, so the
+    args stay a tuple of the same length. Only when a key hides inside an argument that is not a string is the record
+    collapsed into one finished, scrubbed message."""
+    try:
+        if isinstance(record.msg, str):
+            record.msg = scrub(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(scrub(a) if isinstance(a, str) else a for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: scrub(v) if isinstance(v, str) else v for k, v in record.args.items()}
+        message = record.getMessage()
+        if scrub(message) != message:
+            record.msg, record.args = scrub(message), ()
+    except Exception:  # noqa: BLE001 - logging must never raise
+        pass
+
+
 class KeyScrubber(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            record.msg = scrub(record.getMessage())
-            record.args = ()
-        except Exception:  # noqa: BLE001 - logging must never raise
-            pass
+        scrub_record(record)
         return True
 
 
@@ -32,11 +46,7 @@ def install() -> None:
 
         def factory(*args, **kwargs):
             record = old(*args, **kwargs)
-            try:
-                record.msg = scrub(record.getMessage())
-                record.args = ()
-            except Exception:  # noqa: BLE001
-                pass
+            scrub_record(record)
             return record
 
         logging.setLogRecordFactory(factory)
