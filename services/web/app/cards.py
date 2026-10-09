@@ -22,12 +22,15 @@ HAS_ROUTE_LINE = "Use the contact route shown above."
 
 # A GitHub reply carries no project by default. This is the sentence the click adds: fixed, checked once, no model call.
 LINK_SENTENCE = "If it is useful: I made {project}, which touches this topic. {url}"
+LINK_SENTENCE_PITCH = "If it is useful: I made {project}. {pitch} {url}"  # the owner's confirmed project sentence, word for word
 LINK_ADDED_FLAG = "link_added"
 
 
 def route_text(card: dict) -> tuple[str, str]:
     """(fixed words, link) for the line that says where this card belongs. The link is empty when the line has none.
     A writer's contact route is never produced here: it stays the one copied word for word from their own page."""
+    if card.get("source") == "github":  # an issue is answered in the issue, whatever label the find had
+        return ROUTE_LINES["github"], card.get("url", "")
     if card.get("kind") == "resonance":
         if card.get("contact_route"):
             return HAS_ROUTE_LINE, ""
@@ -69,27 +72,30 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9']+", text.lower()))
 
 
-def closing_paragraph(text: str) -> str:
+def closing_paragraph(text: str, exclude: str = "") -> str:
     paragraphs = [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
-    return paragraphs[-1] if paragraphs else ""
+    last = paragraphs[-1] if paragraphs else ""
+    if exclude:  # the fixed project sentence is the same on every card and says nothing about the closing
+        last = " ".join(last.split()).replace(" ".join(exclude.split()), " ")
+    return last
 
 
-def closing_similarity(a: str, b: str) -> float:
+def closing_similarity(a: str, b: str, exclude: str = "") -> float:
     """Share of words the two last paragraphs have in common (shared / all different words)."""
-    wa, wb = _words(closing_paragraph(a)), _words(closing_paragraph(b))
+    wa, wb = _words(closing_paragraph(a, exclude)), _words(closing_paragraph(b, exclude))
     if not wa or not wb:
         return 0.0
     return len(wa & wb) / len(wa | wb)
 
 
-def same_closing_as(card_id: str, draft: str, others: dict[str, str]) -> str | None:
+def same_closing_as(card_id: str, draft: str, others: dict[str, str], exclude: str = "") -> str | None:
     """The id of the earlier card (lower number) whose closing this draft repeats, or None.
     Only the later card yields, so exactly one of two similar drafts is rewritten."""
     mine = int(card_id.lstrip("k") or 0)
     for other_id in sorted(others, key=lambda i: int(i.lstrip("k") or 0)):
         if int(other_id.lstrip("k") or 0) >= mine:
             continue
-        if closing_similarity(draft, others[other_id]) > CLOSING_SIMILARITY_MAX:
+        if closing_similarity(draft, others[other_id], exclude) > CLOSING_SIMILARITY_MAX:
             return other_id
     return None
 
@@ -98,7 +104,9 @@ def closing_hint(other_id: str) -> str:
     return f"same closing as card {other_id}"
 
 
-def link_sentence(project: str, url: str) -> str:
+def link_sentence(project: str, url: str, pitch: str = "") -> str:
+    if pitch:
+        return LINK_SENTENCE_PITCH.format(project=project, pitch=pitch.strip(), url=url)
     return LINK_SENTENCE.format(project=project, url=url)
 
 
@@ -110,11 +118,14 @@ def remove_link(draft: str, sentence: str) -> str:
     return draft.replace(f"\n\n{sentence}", "").replace(sentence, "").rstrip()
 
 
-def strip_project(text: str, names: list[str], url: str) -> str:
-    """For a reply that must not carry the project: drop every paragraph that names it or links it."""
+def strip_project(text: str, names: list[str], url: str, sentence: str = "") -> str:
+    """For a reply that must not carry the project: drop every paragraph that names it, links it or holds its sentence."""
     keep = []
+    flat_sentence = " ".join(sentence.split()).lower()
     for para in [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]:
         low = para.lower()
+        if flat_sentence and flat_sentence in " ".join(low.split()):
+            continue
         if url and url.lower().rstrip("/") in low:
             continue
         if any(n and len(n) >= 3 and re.search(rf"\b{re.escape(n.lower())}\b", low) for n in names):

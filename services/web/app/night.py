@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from . import config, logsafe
-from .repo import open_repo, parse_ts
+from .repo import now, open_repo, parse_ts
 from .service import RunRefused, month_room, run_private
 
 log = logging.getLogger("daylight.night")
@@ -29,11 +29,31 @@ SKIP_IF_RAN_WITHIN_H = 18
 
 
 def _recent_run(repo, project_id: str) -> bool:
+    """Does an earlier start already cover this night? A run that is still going counts, whatever started it. Of the finished ones
+    only a scheduled night counts: a run on click in the afternoon must not swallow the night."""
     for run in repo.list_runs(project_id, 3):
         started = parse_ts(run.get("started_at"))
-        if started and (run.get("status") in ("running", "ok") or (run.get("status") == "partial" and run.get("cards"))) and datetime.now(timezone.utc) - started < timedelta(hours=SKIP_IF_RAN_WITHIN_H):
+        if not started or datetime.now(timezone.utc) - started >= timedelta(hours=SKIP_IF_RAN_WITHIN_H):
+            continue
+        if run.get("status") == "running":
+            return True
+        if run.get("trigger") == "schedule" and (run.get("status") == "ok" or (run.get("status") == "partial" and run.get("cards"))):
             return True
     return False
+
+
+# Refusals that are not an outage of the night: a start that is already covered by a run in progress, or a platform retry.
+QUIET_REFUSALS = ("already_running", "nothing_to_resume")
+
+
+def note_missed_night(repo, project_id: str, reason: str) -> None:
+    """One line for the morning desk: why last night did not run. Written by code, no model call, no ledger line (there was no run).
+    The next run of this workspace removes it."""
+    reason = " ".join(reason.split()).rstrip(".")
+    try:
+        repo.update_project(project_id, lambda d: d.update(night_note={"reason": reason, "at": now()}))
+    except Exception:  # noqa: BLE001 - the note is a courtesy; failing to write it must never stop the other workspaces
+        log.warning("could not write the missed-night note for %s", project_id)
 
 
 def platform_retry() -> bool:
@@ -49,19 +69,30 @@ async def night(args) -> int:
     resume_only = platform_retry()
     if resume_only:
         log.warning("platform retry: this attempt may only resume an unfinished run, never start a new one")
-    projects = [repo.get_project(args.project)] if args.project else [p for p in repo.list_projects() if p.get("confirmed_goals") is not None and p.get("nightly", True)]
+    scheduled = args.trigger == "schedule"
+    if args.project:
+        projects = [repo.get_project(args.project)]
+    else:
+        confirmed = [p for p in repo.list_projects() if p.get("confirmed_goals") is not None]
+        if scheduled and not resume_only:
+            for p in confirmed:
+                if not p.get("nightly", True):
+                    note_missed_night(repo, p["id"], "this workspace is paused")
+        projects = [p for p in confirmed if p.get("nightly", True)]
     code = 0
     for project in projects:
         pid = project["id"]
         if not args.project and not args.force and _recent_run(repo, pid):
             print(json.dumps({"project_id": pid, "skipped": "ran within the last 18 hours"}))
-            continue
+            continue  # the night is covered by a run that happened: no "did not run" line for it
         try:
             ledger = await run_private(
                 repo, pid, trigger=args.trigger, budget_override=args.budget, wait_stale=args.wait_stale, takeover=args.takeover, resume_only=resume_only
             )
         except RunRefused as exc:
             print(json.dumps({"project_id": pid, "refused": exc.reason, "message": exc.message}))
+            if scheduled and not resume_only and exc.reason not in QUIET_REFUSALS:
+                note_missed_night(repo, pid, exc.message)
             if exc.reason in ("global_cap", "no_key"):
                 break  # every further run would be refused for the same reason
             continue  # a refusal exits 0: a non-zero exit would make the platform retry, and a retry must never pay twice

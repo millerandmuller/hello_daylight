@@ -8,6 +8,11 @@
   <p class="eyebrow">{{ project.card.name }}</p>
   <h1 id="desk-title">This morning</h1>
 
+  {% if project.night_note %}<p class="notice" role="status">Last night did not run: {{ project.night_note.reason }}.</p>{% endif %}
+  {% if project.confirmed_goals is not none and not project.pitch_confirmed_at %}
+  <p class="muted small">No confirmed project sentence yet. Add one and every draft uses your words. <a href="/p/{{ project.id }}#pitch">Add it</a></p>
+  {% endif %}
+
   {% if run and run.status == "running" %}
     <p class="notice" id="running-note">A run is {% if run_state == "stale" %}stuck (no sign of life); starting again resumes it{% else %}in progress{% endif %}.
       <a href="/p/{{ project.id }}/stream">Watch the crew</a></p>
@@ -46,12 +51,13 @@
   </div>
 </section>
 
-<details class="project-details" {% if confirm_state != "current" %}open{% endif %}>
+<details class="project-details" {% if confirm_state != "current" or not project.pitch_confirmed_at %}open{% endif %}>
   <summary>Project and goals</summary>
   <article class="card project-card">
     <p class="eyebrow">Your project</p>
     <h2>{{ project.card.name }}</h2>
     {% if project.card.one_liner %}<p class="lede">{{ project.card.one_liner }}</p>{% endif %}
+    {% if project.card.problem %}<p><span class="label">The problem</span> {{ project.card.problem }}</p>{% endif %}
     {% if project.card.audience %}<p><span class="label">Probably for</span> {{ project.card.audience }}</p>{% endif %}
     {% if project.card.observations %}<ul class="observations">{% for o in project.card.observations %}<li>{{ o }}</li>{% endfor %}</ul>{% endif %}
     <p class="source">Read from <a href="{{ project.url }}" rel="noopener noreferrer" target="_blank">{{ project.url }}</a>

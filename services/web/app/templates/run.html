@@ -3,6 +3,7 @@
 {% block content %}
 <p class="muted small"><a href="/p/{{ project.id }}">&larr; This morning</a></p>
 <h1>Run and cost</h1>
+{% if project.night_note %}<p class="notice" role="status">Last night did not run: {{ project.night_note.reason }}.</p>{% endif %}
 {% if run %}
 <p class="status-line"><span class="chip {{ run.status }}">{{ run.status }}</span> {{ run.headline or ("In progress." if run.status == "running" else "Finished.") }}</p>
 {% if run.cost_line %}<p>{{ run.cost_line }}</p>{% endif %}

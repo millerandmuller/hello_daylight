@@ -18,7 +18,7 @@ from .store import MAX_GOALS, ProjectStore, clean_goal, now
 log = logging.getLogger("daylight.intake")
 
 MAX_DESCRIPTION_CHARS = 1000
-PROPOSAL_BUDGET_S = 14.0  # model timeout is 12 s; this also caps SDK-internal retries
+PROPOSAL_BUDGET_S = 19.5  # model timeout is 19 s; this also caps SDK-internal retries; fetch (10 s) + this stays under 30 s
 _AUDIENCE_PREFIX = re.compile(r"^(it is|it's|it seems to be|this is)?\s*(probably|likely|mostly)?\s*(for|aimed at)\s+", re.I)
 
 
@@ -58,6 +58,9 @@ async def _propose_within_budget(propose, page, description, user_goals, api_key
 
 def apply_proposal(data: dict, proposal) -> None:
     data["card"] = proposal.project.model_dump()
+    # The model's suggestion for the project sentence waits for the owner: it counts only after "Confirm" (or the owner's own edit).
+    data["pitch_line"] = " ".join((getattr(proposal, "pitch_line", "") or "").split())
+    data["pitch_confirmed_at"] = None
     data["card"]["audience"] = _AUDIENCE_PREFIX.sub("", data["card"]["audience"]).rstrip(".")
     data["proposal_error"] = None
     existing = {g["text"].lower() for g in data.get("goals", [])}
@@ -108,7 +111,8 @@ async def run_intake(url: str, goals_raw: str, description: str, *, fetch_page, 
         apply_proposal(data, proposal)
     else:
         title = (page.title if page and not fetch_error else "") or normalized
-        data["card"] = {"name": title, "one_liner": (page.description if page and not fetch_error else "") or description, "audience": "", "observations": []}
+        data["card"] = {"name": title, "one_liner": (page.description if page and not fetch_error else "") or description, "problem": "", "audience": "", "observations": []}
+        data["pitch_line"], data["pitch_confirmed_at"] = "", None
     usage = getattr(proposal, "usage", None) or None
     return data, usage
 

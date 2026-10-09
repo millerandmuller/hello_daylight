@@ -5,6 +5,7 @@ Writes are field patches on a fresh read, never a blind overwrite of someone els
 
 import secrets
 
+from .prompts import lint_pitch
 from .repo import NotFound, Repo, now  # noqa: F401  (re-exported: the routes catch NotFound from here)
 
 MAX_GOALS = 20
@@ -17,6 +18,26 @@ def clean_goal(text: str) -> str:
 
 class GoalLimit(Exception):
     pass
+
+
+class NoGoalsAccepted(Exception):
+    """Confirm needs at least one goal the owner accepted or wrote."""
+
+
+class PitchInvalid(Exception):
+    """The project sentence breaks the mechanical rules; `problems` is shown at the field, nothing is corrected silently."""
+
+    def __init__(self, problems: list[str]):
+        super().__init__("; ".join(problems))
+        self.problems = problems
+
+
+ACCEPTED = ("accepted", "edited")
+
+
+def project_names(data: dict) -> list[str]:
+    name = ((data.get("card") or {}).get("name") or "").strip()
+    return [n for n in dict.fromkeys([name, name.split(":")[0].split(" - ")[0].strip()]) if n]
 
 
 class ProjectStore:
@@ -91,16 +112,46 @@ class ProjectStore:
 
         return self.update(token, mutate, owner)
 
-    def confirm_goals(self, token: str, owner: str | None = None) -> dict:
-        """The owner accepts the goal list as it stands. The first night runs only after this."""
+    @staticmethod
+    def accepted_goals(data: dict) -> list[dict]:
+        """What the owner took on: goals they wrote, accepted or changed. A suggestion nobody answered is not among them."""
+        return [g for g in data.get("goals", []) if g["status"] in ACCEPTED]
+
+    def confirm_goals(self, token: str, owner: str | None = None, accept_all: bool = False) -> dict:
+        """The owner confirms the goals they accepted, and the project sentence with them. The first night runs only after this.
+        accept_all (operator tool, tests): every open suggestion is accepted first."""
 
         def mutate(data):
-            for goal in data.get("goals", []):
-                if goal["status"] == "proposed":
-                    goal["status"] = "accepted"
-            data["confirmed_goals"] = [
-                {"id": g["id"], "text": g["text"], "origin": g["origin"], "reason": g["reason"]} for g in self.active_goals(data)
-            ]
+            if accept_all:
+                for goal in data.get("goals", []):
+                    if goal["status"] == "proposed":
+                        goal["status"] = "accepted"
+            accepted = self.accepted_goals(data)
+            if not accepted:
+                raise NoGoalsAccepted()
+            pitch = " ".join((data.get("pitch_line") or "").split())
+            if pitch:
+                problems = lint_pitch(pitch, project_names(data))
+                if problems:
+                    raise PitchInvalid(problems)
+            data["confirmed_goals"] = [{"id": g["id"], "text": g["text"], "origin": g["origin"], "reason": g["reason"]} for g in accepted]
             data["confirmed_at"] = now()
+            if pitch:
+                data["pitch_line"], data["pitch_confirmed_at"] = pitch, now()
+
+        return self.update(token, mutate, owner)
+
+    def set_pitch(self, token: str, text: str, owner: str | None = None) -> dict:
+        """The owner writes or changes the project sentence. No model call. An empty text removes it (the writers fall back to the old rule)."""
+        text = " ".join((text or "").split())
+
+        def mutate(data):
+            if text:
+                problems = lint_pitch(text, project_names(data))
+                if problems:
+                    raise PitchInvalid(problems)
+            data["pitch_line"] = text
+            # After the first confirmation the owner's own words count at once; before it, "Confirm" confirms them with the goals.
+            data["pitch_confirmed_at"] = now() if text and data.get("confirmed_goals") is not None else None
 
         return self.update(token, mutate, owner)

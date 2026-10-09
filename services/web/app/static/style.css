@@ -12,7 +12,7 @@
   --accent-ring: rgba(236, 233, 228, 0.55);
   --accent-text: #ffffff;
   --link: #ece9e4;
-  --ok: #1f7a4d;
+  --ok: #17623d;
   --warn-bg: #f3e3b8;
   --error-bg: #f4d3d3;
   --error: #8f1a1f;
@@ -72,7 +72,7 @@ form.inline { display: inline; }
   padding: 12px 14px; margin-bottom: 8px; display: flex; gap: 12px; justify-content: space-between; align-items: flex-start;
 }
 .goal.proposed { border-style: dashed; }
-.goal.removed { opacity: 0.7; align-items: center; justify-content: flex-start; }
+.goal.removed { opacity: 1; align-items: center; justify-content: flex-start; }
 .goal.removed .goal-text { text-decoration: line-through; }
 .goal-text { margin: 0; font-weight: 600; }
 .reason { margin: 4px 0 0; color: var(--muted); font-size: 0.93rem; }
@@ -176,7 +176,7 @@ h2 { letter-spacing: -0.015em; font-weight: 700; }
 input, textarea {
   border: 1px solid #cfcac2; border-radius: var(--radius); padding: 14px 16px; background: var(--surface); color: #111; box-shadow: none;
 }
-input::placeholder, textarea::placeholder { color: #77726a; }
+input::placeholder, textarea::placeholder { color: #5f5b54; }
 input:focus, textarea:focus { outline: 2px solid var(--text); outline-offset: 2px; box-shadow: none; }
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 
@@ -187,8 +187,11 @@ button, .button {
 button:hover:not(:disabled), .button:hover { background: #b81d23; border-color: #b81d23; transform: none; box-shadow: none; }
 button.secondary, .button.secondary { background: transparent; color: var(--text); border-color: var(--text); box-shadow: none; }
 button.secondary:hover:not(:disabled), .button.secondary:hover { background: var(--text); color: #111; border-color: var(--text); }
+/* inside cream objects --text is dark, so the hover turns black with cream text */
+.card button.secondary:hover:not(:disabled), .panel button.secondary:hover:not(:disabled), .opening button.secondary:hover:not(:disabled), .goal button.secondary:hover:not(:disabled),
+.card .button.secondary:hover, .panel .button.secondary:hover, .opening .button.secondary:hover, .goal .button.secondary:hover { background: #111; color: var(--surface); border-color: #111; }
 button.link { background: none; border: none; box-shadow: none; color: var(--link); padding: 10px 6px; }
-button.picked { background: #111; color: var(--text); border-color: #111; }
+button.picked { background: #111; color: var(--surface); border-color: #111; }
 #intake-submit { padding: 14px 30px; }
 summary, .edit summary, .project-details > summary, .unfinished summary { color: var(--text); }
 
@@ -211,7 +214,7 @@ summary, .edit summary, .project-details > summary, .unfinished summary { color:
 .draft { background: #f7f5f1; border-color: var(--line); padding: 14px 16px; }
 .opening blockquote { border-left: 3px solid #111; color: var(--muted); }
 .card a, .panel a, .opening a, .goal a, .task a, .notice a { color: var(--link); }
-.card summary, .opening summary, .panel summary, .edit summary, .project-details > summary { color: #111; }
+.card summary, .opening summary, .panel summary, .edit summary { color: #111; }
 .project-list li { border-bottom: 1px solid var(--line); padding: 14px 0; }
 .chip { padding: 3px 10px; background: #111; color: var(--surface); font-weight: 600; }
 .chip.running, .chip.replacing { background: var(--accent); color: #fff; }
@@ -231,3 +234,11 @@ code { background: #2c2c2c; color: var(--text); }
   .card, .panel, .opening { padding: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { button, .button, input, textarea { transition: none; } }
+
+/* the project sentence, and the line above the confirm button */
+.pitch { margin: 0 0 32px; }
+.pitch-line { margin: 8px 0; padding: 4px 0 4px 14px; border-left: 3px solid var(--accent); font-size: 1.05rem; color: var(--text); overflow-wrap: anywhere; }
+.steer { font-weight: 600; margin: 0 0 10px; color: var(--text); }
+.confirm button:disabled { cursor: not-allowed; }
+.goal input, .goal-edit input { border-color: #77726a; }
+.goal.removed .muted { color: #46423c; }

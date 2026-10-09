@@ -67,7 +67,8 @@ def test_routes_offer_no_way_out():
         assert not re.search(r"send|mail|publish|deliver|dm\b|tweet|webhook", path, re.I), path
     posts = sorted(r.path for r in main.app.routes if "POST" in getattr(r, "methods", ()))
     public = [p for p in posts if p.startswith("/api/public/")]
-    assert public == ["/api/public/intake", "/api/public/key-check", "/api/public/run"]
+    # pitch-check only runs the mechanical rules on a sentence and answers; it stores nothing and contacts no one
+    assert public == ["/api/public/intake", "/api/public/key-check", "/api/public/pitch-check", "/api/public/run"]
     # sign copies to the clipboard (in the browser) and marks the draft; it contacts no one
     sign = SOURCES["main.py"][SOURCES["main.py"].index("def card_action"): SOURCES["main.py"].index("def inbox")]
     assert "httpx" not in sign and "smtp" not in sign.lower() and "launch" not in sign
@@ -82,7 +83,7 @@ def test_a_scout_has_read_tools_only():
 def test_the_browser_script_never_sends_a_draft_anywhere():
     js = (APP / "static" / "public.js").read_text()
     fetches = re.findall(r'(?:api|fetch)\("([^"]+)"', js)
-    assert set(fetches) <= {"/api/public/key-check", "/api/public/intake", "/api/public/run"}, fetches
+    assert set(fetches) <= {"/api/public/key-check", "/api/public/intake", "/api/public/pitch-check", "/api/public/run"}, fetches
     assert "mailto:" not in js and "window.open" not in js and "sendBeacon" not in js
     desk = (APP / "static" / "desk.js").read_text()
     assert "fetch(" not in desk and "XMLHttpRequest" not in desk and "sendBeacon" not in desk

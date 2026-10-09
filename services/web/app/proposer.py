@@ -1,5 +1,6 @@
 """Intake: read the project and suggest goals, each with a reason. One fast-model call, not the nightly planner."""
 
+import re
 from datetime import date
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -7,24 +8,26 @@ from pydantic import BaseModel, Field, PrivateAttr
 from . import config
 from .fetcher import PageSnapshot
 
-TIMEOUT_MS = 12_000  # fetch budget (<=16 s) + this stays under the 30 s intake promise
+TIMEOUT_MS = 19_000  # fetch budget (10 s) + this stays under the 30 s intake promise; the card now also carries `problem` and `pitch_line`
 
 
 class GoalSuggestion(BaseModel):
-    text: str = Field(description="Short goal in plain words, 2-6 words, e.g. 'First users'.")
-    reason: str = Field(description="One sentence. Starts with what the page shows, e.g. 'The page is three weeks old and names no prices.'")
+    text: str = Field(description="Short goal in plain words, 3-8 words: a group of people defined by the problem they have, e.g. 'Writers who keep daily notes but never publish them'. The group exists whether or not this project does. Never a group defined by its relation to this project (its testers, its early users, the invited, its self-hosters).")
+    reason: str = Field(description="One sentence: why this group of people has the problem the project solves, e.g. 'People who just launched a small tool often have no way to reach their first ten users.' It never rests on the state of the project.")
 
 
 class ProjectCard(BaseModel):
     name: str
-    one_liner: str = Field(description="What the project does, one plain sentence.")
+    one_liner: str = Field(description="What the project does for the people it is built for, one plain sentence. Say what it does for them first, how it does it only after.")
+    problem: str = Field(default="", description="The problem of the people this project is built for, in one sentence and in their own words, e.g. 'You built something and nobody uses it yet.' If the material does not say, write it as a guess with the word 'probably'. Never invent it.")
     audience: str = Field(description="Only the group of people, as a short noun phrase without a verb, e.g. 'newsletter writers who keep daily notes'. It is shown after the label 'Probably for'.")
-    observations: list[str] = Field(description="2-4 short facts read directly off the material.")
+    observations: list[str] = Field(description="2-4 short facts read directly off the material, including the state of the project (stars, commits, invite-only, a deploy script, first nights still ahead). These facts never justify a goal.")
 
 
 class Proposal(BaseModel):
     project: ProjectCard
     goals: list[GoalSuggestion]
+    pitch_line: str = Field(default="", description="One sentence, at most 30 words, that says what the project does for whom. No project name, no link, no technology words. It must read well right after 'I made <project>.' Example: 'It finds public questions your project answers and drafts a reply you send yourself.'")
     _usage: dict = PrivateAttr(default_factory=dict)  # model, tokens, cost of the one call; for the ledger, not for the model
 
     @property
@@ -46,14 +49,21 @@ Rules:
 - {source_rule}
 - If something is unclear, say it is a guess ("probably", "seems").
 - Voice: plain, short, second person where you address the owner, no exclamation marks, no marketing adjectives.
-- Suggest at least {n_min} and at most {n_max} goals; never fewer than {n_min}. Each goal is short (2-6 words) and has one reason that points at
-  something visible in the material (age of the page, missing prices, a waitlist, a changelog, a GitHub repo, a newsletter archive ...).
-- A goal is always about people outside the project that a search crew can find in public places
-  (forum threads, issues, articles, newsletters, podcasts): first users, paying customers, press or podcast coverage,
-  feedback from a specific group, beta testers, contributors. Never an internal task (triaging issues, writing docs,
-  redesigning the page, raising prices). Name the group as specifically as the material allows.
+- Suggest at least {n_min} and at most {n_max} goals; never fewer than {n_min}. Each goal is short (3-8 words).
+- First work out the project's `problem`: what the people it is built for struggle with, in their words. The owner's own description wins over the page text when both say something about the purpose. If neither says, write the problem as a guess ("probably ...").
+- A goal names a group of people who have that problem or write about it, and where they can be found in public (forum threads,
+  issues, articles, newsletters, podcasts). Name the group by the problem it has, as specifically as the material allows.
+  Never an internal task (triaging issues, writing docs, redesigning the page, raising prices).
+- The group exists whether or not this project does. Never define it by its relation to this project or by how far the project has come:
+  not "testers of the tool", "early users", "invited users", "people who self-host it", "users of the public mode".
+  Wrong for a note-taking app: "Beta testers for the app", "Self-hosters of the app". Right: "Writers asking how to keep a daily notes habit".
+- The reason of a goal says why that group has the problem. It may point at the page, but it never rests on the state of the project.
+  Facts about the state of the project (stars, commits, "invite-only", a deploy script, "first nights still ahead", the age of the page, a waitlist)
+  belong under `observations` and are never the reason for a goal.
 - Prefer goals that bring the project closer to real use: users, customers, coverage, feedback. Suggest contributors or
   sponsors only when the material clearly asks for them.
+- `pitch_line` says what the project does for whom, in one sentence of at most 30 words, with no project name, no link and no technology
+  words (agents, models, orchestration, crew). Example for a note-taking app: "It turns your daily notes into a weekly issue you can send."
 - The owner already has these goals of their own. Do not repeat or rephrase them, suggest only additional ones:
 {user_goals}
 - Write everything in English.
@@ -62,6 +72,9 @@ Rules:
 {material}
 </material>
 """
+
+
+_MATERIAL_TAG = re.compile(r"<\s*/?\s*material\s*>", re.I)
 
 
 def _material(page: PageSnapshot | None, description: str | None) -> str:
@@ -78,9 +91,14 @@ def _material(page: PageSnapshot | None, description: str | None) -> str:
             f"Page text: {page.text}",
         ]
     if description:
-        parts.append(f"Owner's own description: {description}")
-    # The page must not be able to close the material block.
-    return "\n".join(parts).replace("</material>", "").replace("<material>", "")
+        parts.append(f"Owner's own description (it wins over the page text where both say what the project is for): {description}")
+    # The page must not be able to close the material block (removed until nothing is left, so "</mat</material>erial>" cannot rebuild it).
+    text = "\n".join(parts)
+    while True:
+        cleaned = _MATERIAL_TAG.sub("", text)
+        if cleaned == text:
+            return text
+        text = cleaned
 
 
 def propose(page: PageSnapshot | None, description: str | None, user_goals: list[str], api_key: str | None = None) -> Proposal:
@@ -98,7 +116,7 @@ def propose(page: PageSnapshot | None, description: str | None, user_goals: list
         n_max=n_max,
         user_goals="\n".join(f"  - {g}" for g in user_goals) or "  (none)",
         source_rule=(
-            "Reasons point at something on the page."
+            "A reason says why the group has the problem; it may point at something on the page."
             if page
             else "There is no page, only the owner's own description. Never say 'the page'; say 'you describe it as ...'."
         ),
@@ -113,6 +131,7 @@ def propose(page: PageSnapshot | None, description: str | None, user_goals: list
                 response_mime_type="application/json",
                 response_schema=Proposal,
                 temperature=0.4,
+                thinking_config=types.ThinkingConfig(thinking_level="LOW"),  # same as the night agents: the intake answers in time
             ),
         )
     except Exception as exc:  # network, quota, timeout: all end in the same visible retry state

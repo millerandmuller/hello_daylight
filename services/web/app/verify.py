@@ -17,6 +17,8 @@ from .web import SafeHttp
 MAX_AGE_DAYS = 90
 AUTHOR_COOLDOWN_DAYS = 30
 MIN_QUOTE_CHARS = 12
+_GITHUB_THREAD = re.compile(r"^https?://(?:www\.)?github\.com/[^/]+/[^/]+/(?:issues|pull|discussions)/\d+", re.I)
+NOT_AN_ARTICLE = "an issue is not an article"
 AGGREGATORS = {"news.ycombinator.com", "github.com", "bsky.app", "reddit.com", "stackoverflow.com", "dev.to", "medium.com", "substack.com"}
 
 
@@ -86,6 +88,14 @@ async def verify_finding(finding: Finding, kind: str, evidence: Evidence, vc: Ve
     quote = norm_text(finding.quote)
     if len(quote) < MIN_QUOTE_CHARS or quote not in norm_text(ev.title + " " + ev.text):
         return None, "the quote is not on the page"
+    on_github_thread = bool(_GITHUB_THREAD.match(ev.url))
+    if on_github_thread and kind == "resonance":
+        # An issue, a discussion or a pull request is somebody's question in a tracker, never a writer's text. It goes on as a
+        # question when it reads like one (the title or the quote asks something); otherwise it is dropped, with the reason.
+        if "?" in finding.quote or "?" in ev.title:
+            kind = "question"
+        else:
+            return None, NOT_AN_ARTICLE
     problem = _age_problem(ev.date, vc.today)
     if problem:
         return None, problem
@@ -129,7 +139,7 @@ async def verify_finding(finding: Finding, kind: str, evidence: Evidence, vc: Ve
             "title": ev.title,
             "date": ev.date,
             "date_basis": ev.date_basis,
-            "source": ev.source,
+            "source": "github" if on_github_thread else ev.source,
             "replies": ev.replies,
             "kind": kind,
             "why": finding.why.strip(),

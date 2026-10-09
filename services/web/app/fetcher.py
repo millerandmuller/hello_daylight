@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 
 USER_AGENT = "HelloDaylight/0.1 (+https://github.com/millerandmuller/hello_daylight)"
 TIMEOUT = httpx.Timeout(6.0, connect=4.0)
-TOTAL_BUDGET_S = 10.0  # hard cap on the whole fetch; + 12 s model timeout keeps intake under 30 s
+TOTAL_BUDGET_S = 10.0  # hard cap on the whole fetch; + the 19.5 s model budget keeps intake under 30 s
 MAX_BYTES = 1_000_000
 MAX_REDIRECTS = 5
 MAX_TEXT_CHARS = 8000

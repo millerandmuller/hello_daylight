@@ -18,7 +18,7 @@ from datetime import date, datetime, timezone
 
 from . import cards as cardtext
 from . import config, prompts
-from .evidence import Evidence, canonical_url, domain_of, untrusted_block
+from .evidence import EXCLUDED_SOURCE_NAMES, Evidence, canonical_url, domain_of, excluded_source_mentioned, untrusted_block
 from .llm import CallFailed, ModelGateway
 from .meter import REASON_TEXT, RunMeter, RunStopped
 from .schemas import Critique, Curation, Draft, Evaluation, Plan, ScoutOutput
@@ -34,6 +34,7 @@ MAX_RESUMES = 3  # a run that failed for an infrastructure reason may be resumed
 WEAK_SCORE = 4
 # first labels of hosts many projects share: they say nothing about the project's own name
 GENERIC_HOSTS = {"github", "gitlab", "vercel", "netlify", "pages", "app", "web", "www", "run", "herokuapp", "notion", "substack", "medium", "dev", "io", "com", "org", "net", "site"}
+NO_ANGLE_LEFT = "no allowed angle left for this scout"
 RELEVANCE_FLOOR = 6  # a curated pick below this does not become a card: fewer cards with a reason beat an embarrassing one
 
 
@@ -48,6 +49,8 @@ class ProjectInput:
     name: str
     url: str = ""
     one_liner: str = ""
+    problem: str = ""  # the problem of the people the project is built for, in their words (a guess when the material did not say)
+    pitch_line: str = ""  # the project sentence the owner confirmed; empty = none yet, the writers fall back to PITCH_RULE
     audience: str = ""
     goals: list[str] = field(default_factory=list)
     feedback: list[dict] = field(default_factory=list)  # {kind: up|down|edit, comment, card_title, card_url, original, final}
@@ -237,9 +240,11 @@ class NightRun:
     def _project_text(self) -> str:
         p = self.p
         goals = "\n".join(f"- {g}" for g in p.goals) or "- (none given)"
+        problem = f"The problem of the people it is for: {p.problem}\n" if p.problem else ""
+        sentence = f"Project sentence the owner confirmed: {p.pitch_line}\n" if p.pitch_line else ""
         return (
-            f"Project: {p.name}\nAddress: {p.url or '(none)'}\nWhat it does: {p.one_liner or '(unknown)'}\n"
-            f"Probably for: {p.audience or '(unknown)'}\nGoals the owner confirmed:\n{goals}"
+            f"Project: {p.name}\nAddress: {p.url or '(none)'}\nWhat it does: {p.one_liner or '(unknown)'}\n{problem}"
+            f"Probably for: {p.audience or '(unknown)'}\n{sentence}Goals the owner confirmed:\n{goals}"
         )
 
     def _feedback_text(self) -> str:
@@ -353,7 +358,7 @@ class NightRun:
             return
         c = self.contract
         instruction = prompts.PLAN_INSTRUCTION.format(
-            today=self.today.isoformat(), n_min=c.min_tasks, n_max=c.max_tasks, n_target=(c.min_tasks + c.max_tasks) // 2 + 1, tools=prompts.tools_text(), voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE
+            today=self.today.isoformat(), n_min=c.min_tasks, n_max=c.max_tasks, n_target=(c.min_tasks + c.max_tasks) // 2 + 1, tools=prompts.tools_text(), excluded=EXCLUDED_SOURCE_NAMES, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE
         )
         used = ", ".join(self.p.used_sources[:20]) or "(nothing yet)"
         user = f"{self._project_text()}\n\nAlready used (domains of recent openings): {used}\n\nOwner feedback since the last night:\n{self._feedback_text()}"
@@ -397,6 +402,10 @@ class NightRun:
             problems.append("no 'question' scout")
         if self.p.feedback and not plan.feedback_note.strip():
             problems.append("feedback exists but feedback_note is empty")
+        for i, t in enumerate(plan.tasks, 1):
+            bad = excluded_source_mentioned(t.instruction)
+            if bad:
+                problems.append(f"scout {i} is sent to an excluded source ('{bad}'); those are closed to the crew ({EXCLUDED_SOURCE_NAMES})")
         return problems
 
     # ------------------------------------------------------------------------------------------
@@ -460,7 +469,9 @@ class NightRun:
     async def _evaluate_one(self, tid: str) -> Evaluation:
         t = self.S["tasks"][tid]
         spec = t["spec"]
-        instruction = prompts.EVAL_INSTRUCTION.format(today=self.today.isoformat(), voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
+        instruction = prompts.EVAL_INSTRUCTION.format(
+            today=self.today.isoformat(), tools=", ".join(spec["tools"]), excluded=EXCLUDED_SOURCE_NAMES, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE
+        )
         dropped = "; ".join(f"{d['reason']}" for d in t["dropped"][:6]) or "none"
         user = (
             f"{self._project_text()}\n\nScout: {spec['role']} (kind {spec['kind']})\nIts instruction: {spec['instruction'][:700]}\n"
@@ -473,6 +484,20 @@ class NightRun:
             ev.verdict = "replace"  # nothing usable is never a keep
         if ev.verdict == "replace" and not (ev.new_instruction or "").strip():
             ev.new_instruction = f"{spec['instruction']}\nThe earlier attempt found nothing usable. Use different search words and other sources."
+        if ev.verdict == "replace":
+            bad = excluded_source_mentioned(ev.new_instruction)
+            if bad:  # code has the last word: one corrected instruction may be asked for, inside this judge's own call budget
+                again = await self.gateway.run_agent(
+                    step="evaluate", tier="mid", name=f"judge_{tid}", instruction=instruction,
+                    user_text=f"{user}\n\nYour new instruction sends the scout to an excluded source ('{bad}'). Write it again for exactly these tools ({', '.join(spec['tools'])}) and without {EXCLUDED_SOURCE_NAMES}.",
+                    output_schema=Evaluation, deadline_s=90, max_model_calls=2,
+                )
+                fixed = again.parsed
+                if fixed.verdict == "replace" and (fixed.new_instruction or "").strip() and not excluded_source_mentioned(fixed.new_instruction):
+                    ev.new_instruction = fixed.new_instruction
+                else:  # no allowed angle: the scout stays as it is and nothing counts as a replacement
+                    ev.verdict, ev.new_instruction = "keep", None
+                    ev.reason = NO_ANGLE_LEFT
         return ev
 
     async def _evaluate_and_replace(self) -> None:
@@ -662,10 +687,14 @@ class NightRun:
         rank = (self.S["picks"] or []).index(item) if item in (self.S["picks"] or []) else 99
         card_id = f"k{rank + 1}"
         kind = item["kind"]
-        # A reply in a stranger's issue answers the question and carries no project; the owner adds the link with one click.
-        plain = kind == "question" and item["source"] == "github"
+        # A reply in a stranger's tracker answers the question and carries no project, whatever label the find had; the owner adds the link with one click.
+        plain = item["source"] == "github"
+        pitch = "" if plain else self.p.pitch_line  # what the writer is told to use
         if plain:
             writer_instr = prompts.WRITE_QUESTION_PLAIN.format(voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
+        elif pitch:
+            tmpl = prompts.WRITE_QUESTION_FIXED if kind == "question" else prompts.WRITE_RESONANCE_FIXED
+            writer_instr = tmpl.format(project=self.p.name, url=self.p.url or "", pitch=prompts.PITCH_FIXED.format(sentence=pitch), voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
         else:
             tmpl = prompts.WRITE_QUESTION if kind == "question" else prompts.WRITE_RESONANCE
             writer_instr = tmpl.format(project=self.p.name, url=self.p.url or "", pitch=prompts.PITCH_RULE, voice=prompts.VOICE, untrusted=prompts.UNTRUSTED_RULE)
@@ -678,25 +707,28 @@ class NightRun:
         draft, problems, original = "", [], ""
         names = self.p.names()
         lint: list[str] = []
+        critic_points: list[str] = []
         for round_no in range(1, c.max_rounds_write + 1):
             ask = base if not draft else f"{base}\n\nYour previous draft:\n{draft}\n\nFix these problems and write the draft again: {'; '.join(problems)}"
             res = await self.gateway.run_agent(step="write", tier="mid", name=f"writer_{kind}", instruction=writer_instr, user_text=ask, output_schema=Draft, deadline_s=90, max_model_calls=2)
             draft = res.parsed.text.strip()
             original = original or draft
-            lint = self._lint(draft, names, plain, card_id)
+            lint = self._lint(draft, names, plain, card_id, self.p.pitch_line)
             if lint and round_no < c.max_rounds_write:
                 problems = lint  # a mechanical failure needs no editor
                 continue
             crit_instr = prompts.CRITIC_INSTRUCTION.format(rules=prompts.DRAFT_RULES, lint="; ".join(lint) or "none", untrusted=prompts.UNTRUSTED_RULE)
             cres = await self.gateway.run_agent(step="critic", tier="mid", name="critic", instruction=crit_instr, user_text=f"{base}\n\nDraft to check:\n{draft}", output_schema=Critique, deadline_s=90, max_model_calls=2)
+            critic_points = [] if cres.parsed.ok else list(cres.parsed.problems or [])[:3]  # the verdict on THIS draft; only the last one is kept
             if cres.parsed.ok and not lint:
                 problems = []
                 break
             problems = (cres.parsed.problems or []) + lint
         draft = prompts.mechanical_fix(draft)
         if plain:  # the last word is code: whatever the model did, this reply carries no project
-            draft = cardtext.strip_project(draft, names, self.p.url) or draft
-        left = self._lint(draft, names, plain, card_id)
+            draft = cardtext.strip_project(draft, names, self.p.url, self.p.pitch_line) or draft
+        left = self._lint(draft, names, plain, card_id, self.p.pitch_line)
+        left += [pt for pt in critic_points if pt not in left]  # a rejection by the editor is never silent: it stands on the card
         self._drafts[card_id] = draft
         route_words, route_url = cardtext.route_text({"kind": kind, "source": item["source"], "contact_route": item["contact_route"], "url": item["url"]})
         return {
@@ -717,7 +749,7 @@ class NightRun:
             "contact_source_url": item["contact_source_url"],
             "route_words": route_words,
             "route_url": route_url,
-            "link_sentence": cardtext.link_sentence(self.p.name, self.p.url) if plain and self.p.url else None,
+            "link_sentence": cardtext.link_sentence(self.p.name, self.p.url, self.p.pitch_line) if plain and self.p.url else None,
             "link_added": False,
             "draft": draft,
             "original_draft": original,
@@ -728,12 +760,12 @@ class NightRun:
             "task_id": item.get("task_id"),
         }
 
-    def _lint(self, draft: str, names: list[str], plain: bool, card_id: str) -> list[str]:
+    def _lint(self, draft: str, names: list[str], plain: bool, card_id: str, pitch: str = "") -> list[str]:
         """The rule-based problems of a draft, in the same place for every round: style, project mentions and a closing
         that repeats another card's of this night."""
-        problems = prompts.lint_draft(draft, names, project_allowed=not plain, project_url=self.p.url or "")
+        problems = prompts.lint_draft(draft, names, project_allowed=not plain, project_url=self.p.url or "", pitch_line=pitch)
         self._drafts[card_id] = draft  # the other cards of this night compare against the newest version
-        other = cardtext.same_closing_as(card_id, draft, {k: v for k, v in self._drafts.items() if k != card_id})
+        other = cardtext.same_closing_as(card_id, draft, {k: v for k, v in self._drafts.items() if k != card_id}, pitch)
         if other:
             problems.append(f'{cardtext.closing_hint(other)} ("{cardtext.closing_paragraph(self._drafts[other])[:120]}"): write a different closing that fits this source')
         return problems

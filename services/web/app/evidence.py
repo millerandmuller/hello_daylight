@@ -89,6 +89,22 @@ def canonical_url(url: str) -> str:
 EXCLUDED_DOMAINS = ("redd.it", "lnkd.in", "reddit.com", "x.com", "twitter.com", "linkedin.com", "skool.com", "facebook.com", "instagram.com")
 
 
+# The same list as words, for the lead's instructions and for the check on a replacement instruction.
+EXCLUDED_SOURCE_NAMES = "Reddit, X (Twitter), LinkedIn, Skool, Facebook, Instagram"
+_EXCLUDED_MENTION = re.compile(
+    r"reddit|redd\.it|\br/\w+|twitter|\bx\.com|linkedin|lnkd\.in|skool|facebook|instagram|\b(?:on|from|via|using|search|searching) X(?![\w-])|\bX (?:posts?|threads?|accounts?|search)\b",
+    re.I,
+)
+
+
+def excluded_source_mentioned(text: str) -> str | None:
+    """The first excluded source a text sends a scout to, or None."""
+    m = _EXCLUDED_MENTION.search(text or "")
+    if not m:
+        return None
+    return m.group(0)
+
+
 def is_excluded(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower().rstrip(".")
     return any(host == d or host.endswith("." + d) for d in EXCLUDED_DOMAINS)
