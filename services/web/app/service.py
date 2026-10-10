@@ -66,6 +66,8 @@ def build_project_input(repo: Repo, project: dict) -> ProjectInput:
         name=card.get("name") or project.get("url", "project"),
         url=project.get("url", ""),
         one_liner=card.get("one_liner") or "",
+        problem=card.get("problem") or "",
+        pitch_line=(project.get("pitch_line") or "") if project.get("pitch_confirmed_at") else "",
         audience=card.get("audience") or "",
         goals=active_goal_texts(project),
         feedback=feedback,
@@ -185,6 +187,8 @@ async def run_private(
         await asyncio.to_thread(
             repo.patch_run, run_id, {"status": "running", "reason": "", "headline": "", "resumable": False, "cancel_requested": False}
         )
+    if project.get("night_note"):  # this project has a run again: last night's "did not run" line is no longer true
+        await asyncio.to_thread(repo.update_project, project_id, lambda d: d.pop("night_note", None))
     pinput = await asyncio.to_thread(build_project_input, repo, project)
     io = RepoRunIO(repo, project_id, run_id, emit_cb=emit)
     run = NightRun(project=pinput, contract=contract, api_key=key or "", io=io, trigger=trigger, run_id=run_id, http=http, gateway=gateway)

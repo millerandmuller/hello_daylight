@@ -1,6 +1,24 @@
 <section id="goals" class="goals">
+  <div id="pitch" class="pitch">
+    <h2>One sentence about your project</h2>
+    <p class="hint">Every draft uses this sentence word for word, after "I made {{ project.card.name }}." No model is called when you change it.</p>
+    {% if pitch_error %}<p class="notice error" role="alert">This sentence needs a change: {{ pitch_error | join("; ") }}.</p>{% endif %}
+    {% if editing_pitch or not project.pitch_line %}
+    <form method="post" action="/p/{{ project.id }}/pitch" hx-post="/p/{{ project.id }}/pitch" hx-target="#goals" hx-swap="outerHTML" class="goal-edit">
+      <label class="visually-hidden" for="pitch-text">Project sentence</label>
+      <input id="pitch-text" name="text" maxlength="400" value="{{ pitch_draft if pitch_draft is defined else (project.pitch_line or '') }}" placeholder="It finds public questions your project answers and drafts a reply you send yourself.">
+      <button type="submit">Save sentence</button>
+    </form>
+    {% if not project.pitch_line %}<p class="hint">No confirmed project sentence yet. Add one and every draft uses your words.</p>{% endif %}
+    {% else %}
+    <p class="pitch-line">{{ project.pitch_line }}</p>
+    <p class="muted small">{% if project.pitch_confirmed_at %}Confirmed.{% else %}Suggested from your page. It counts once you confirm below.{% endif %}
+      <a class="button secondary" href="/p/{{ project.id }}/pitch/edit" hx-get="/p/{{ project.id }}/pitch/edit" hx-target="#goals" hx-swap="outerHTML">Edit</a></p>
+    {% endif %}
+  </div>
+
   <h2>Goals</h2>
-  <p class="hint">Keep, change or remove any suggestion, and add your own. Empty is fine: then the planner decides and explains why.</p>
+  <p class="hint">Accept the suggestions you want, change or remove the rest, and add your own. A suggestion you did not accept is not used.</p>
 
   {% if goal_error %}<p class="notice error" role="alert">{{ goal_error }}</p>{% endif %}
 
@@ -36,10 +54,10 @@
       <div class="goal-actions">
         {% if g.status == "proposed" %}
         <form method="post" action="/p/{{ project.id }}/goals/{{ g.id }}/accept" hx-post="/p/{{ project.id }}/goals/{{ g.id }}/accept" hx-target="#goals" hx-swap="outerHTML" class="inline">
-          <button type="submit">Keep</button>
+          <button type="submit">Accept</button>
         </form>
         {% else %}
-        <span class="kept" aria-label="kept">Kept</span>
+        <span class="kept" aria-label="accepted">Accepted</span>
         {% endif %}
         <a class="button secondary" href="/p/{{ project.id }}/goals/{{ g.id }}/edit" hx-get="/p/{{ project.id }}/goals/{{ g.id }}/edit" hx-target="#goals" hx-swap="outerHTML">Change</a>
         <form method="post" action="/p/{{ project.id }}/goals/{{ g.id }}/remove" hx-post="/p/{{ project.id }}/goals/{{ g.id }}/remove" hx-target="#goals" hx-swap="outerHTML" class="inline">
@@ -61,13 +79,20 @@
 
   <div class="confirm">
     {% if confirm_state == "current" %}
-      <p class="confirmed">Confirmed. Tonight's crew works on {% if active_count %}these {{ active_count }} goal{{ "s" if active_count != 1 }}{% else %}goals the planner picks and explains{% endif %}.</p>
+      <p class="confirmed">Confirmed. Tonight's crew works on {% if accepted_count %}these {{ accepted_count }} goal{{ "s" if accepted_count != 1 }}{% else %}goals the planner picks and explains{% endif %}.</p>
     {% else %}
-      {% if confirm_state == "stale" %}<p class="notice">You changed the goals since confirming.</p>{% endif %}
+      {% if confirm_state == "stale" and pitch_pending %}<p class="notice">The project sentence is waiting for your confirmation.</p>
+      {% elif confirm_state == "stale" %}<p class="notice">You changed the goals since confirming.</p>{% endif %}
+      <p class="steer">These goals steer the whole night.</p>
+      {% if accepted_count %}
       <form method="post" action="/p/{{ project.id }}/confirm" hx-post="/p/{{ project.id }}/confirm" hx-target="#goals" hx-swap="outerHTML">
-        <button type="submit">{% if active_count %}Confirm {{ active_count }} goal{{ "s" if active_count != 1 }}{% else %}Confirm: let the planner decide{% endif %}</button>
+        <button type="submit">Confirm {{ accepted_count }} goal{{ "s" if accepted_count != 1 }}{% if project.pitch_line %} and the sentence{% endif %}</button>
       </form>
-      <p class="hint">Confirming keeps every goal still on the list.</p>
+      <p class="hint">Confirming takes only the goals you accepted.</p>
+      {% else %}
+      <button type="button" disabled>Confirm</button>
+      <p class="hint" role="status">Accept at least one suggestion or add a goal of your own first.</p>
+      {% endif %}
     {% endif %}
   </div>
 </section>

@@ -68,11 +68,12 @@
       btn.disabled = false;
       if (!res.ok) {
         msg.textContent = res.body.error || "That did not work.";
-        if (res.body.need_description) { $("p-desc-wrap").hidden = false; msg.textContent += " Describe your project in one sentence and try again."; }
+        if (res.body.need_description) { $("p-desc-opt").hidden = true; $("p-desc").focus(); msg.textContent += " Tell me in one or two sentences what it does and for whom, then try again."; }
         return;
       }
       msg.textContent = res.body.proposal_error || "";
-      state.project = { url: res.body.url, card: res.body.card, goals: res.body.goals };
+      $("p-desc-opt").hidden = false;
+      state.project = { url: res.body.url, card: res.body.card, goals: res.body.goals, pitch_line: res.body.pitch_line || "", pitch_confirmed: false, pitch_editing: false };
       state.cards = []; state.headline = ""; state.costLine = ""; state.note = "";
       save(); renderAll();
     }).catch(function () { btn.disabled = false; msg.textContent = "Could not reach the server. Try again."; });
@@ -80,6 +81,41 @@
 
   // --- 3. goals --------------------------------------------------------------------------------
   function active() { return (state.project ? state.project.goals : []).filter(function (g) { return g.status !== "removed"; }); }
+  // What the owner took on. A suggestion nobody answered is not used.
+  function accepted() { return active().filter(function (g) { return g.status === "accepted" || g.status === "edited"; }); }
+  function pitchName() { var p = state.project || {}; return (p.card && p.card.name) || p.url || ""; }
+  function renderPitch(message, typed) {
+    var box = $("pitch-box"), p = state.project; clear(box);
+    if (!p) return;
+    box.appendChild(el("h3", { text: "One sentence about your project" }));
+    box.appendChild(el("p", { class: "hint", text: "Every draft uses this sentence word for word, after \"I made " + pitchName() + ".\" No model is called when you change it." }));
+    var err = el("p", { class: "notice error", role: "alert", text: message || "" });
+    err.hidden = !message;
+    function check(text, then) {
+      api("/api/public/pitch-check", { text: text, name: pitchName() }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j.ok) { then(); return; }
+        p.pitch_editing = true;
+        renderPitch(j.problems ? "This sentence needs a change: " + j.problems.join("; ") + "." : (j.error || "The sentence could not be checked."), text);  // the box is rebuilt: the message and the typed text go with it
+      }).catch(function () { err.hidden = false; err.textContent = "Could not reach the server. Try again."; });
+    }
+    var input = el("input", { maxlength: "400", "aria-label": "Project sentence", placeholder: "It finds public questions your project answers and drafts a reply you send yourself." });
+    input.value = typed != null ? typed : (p.pitch_line || "");
+    box.appendChild(err);
+    if (p.pitch_editing || !p.pitch_line) {
+      box.appendChild(el("div", { class: "goal-edit" }, input, el("button", { type: "button", text: "Save sentence", onclick: function () {
+        var t = input.value.replace(/\s+/g, " ").trim();
+        if (!t) { p.pitch_line = ""; p.pitch_confirmed = false; p.pitch_editing = false; save(); renderPitch(); return; }
+        check(t, function () { p.pitch_line = t; p.pitch_confirmed = true; p.pitch_editing = false; save(); renderPitch(); });
+      } })));
+      if (!p.pitch_line) box.appendChild(el("p", { class: "hint", text: "No confirmed project sentence yet. Add one and every draft uses your words." }));
+    } else {
+      box.appendChild(el("p", { class: "pitch-line", text: p.pitch_line }));
+      var row = el("p", { class: "muted small" }, p.pitch_confirmed ? "Confirmed. " : "Suggested from your page. It counts once you use it. ");
+      if (!p.pitch_confirmed) row.appendChild(el("button", { type: "button", text: "Use this sentence", onclick: function () { check(p.pitch_line, function () { p.pitch_confirmed = true; save(); renderPitch(); }); } }));
+      row.appendChild(el("button", { type: "button", class: "secondary", text: "Edit", onclick: function () { p.pitch_editing = true; renderPitch(); } }));
+      box.appendChild(row);
+    }
+  }
   function renderGoals() {
     var has = !!state.project;
     $("goals-panel").hidden = !has; $("run-panel").hidden = !has;
@@ -88,7 +124,9 @@
     clear(box);
     box.appendChild(el("h3", { text: card.name || state.project.url }));
     if (card.one_liner) box.appendChild(el("p", { class: "lede", text: card.one_liner }));
+    if (card.problem) box.appendChild(el("p", {}, el("span", { class: "label", text: "The problem " }), card.problem));
     if (card.audience) box.appendChild(el("p", {}, el("span", { class: "label", text: "Probably for " }), card.audience));
+    renderPitch();
     var list = $("goal-list"); clear(list);
     state.project.goals.forEach(function (g) {
       var li = el("li", { class: "goal " + g.status });
@@ -100,7 +138,7 @@
         var body = el("div", { class: "goal-body" }, el("p", { class: "goal-text" }, el("span", { class: "tag" + (g.origin === "user" ? " own" : ""), text: g.origin === "user" ? "Your goal" : "Suggestion" }), g.text));
         if (g.reason) body.appendChild(el("p", { class: "reason", text: "Reason: " + g.reason }));
         var acts = el("div", { class: "goal-actions" });
-        if (g.status === "proposed") acts.appendChild(el("button", { type: "button", text: "Keep", onclick: function () { g.status = "accepted"; save(); renderGoals(); } }));
+        if (g.status === "proposed") acts.appendChild(el("button", { type: "button", text: "Accept", onclick: function () { g.status = "accepted"; save(); renderGoals(); } }));
         acts.appendChild(el("button", { type: "button", class: "secondary", text: "Change", onclick: function () {
           var t = prompt("Change the goal", g.text); t = (t || "").replace(/\s+/g, " ").trim().slice(0, 200);
           if (t) { if (!g.original_text && t !== g.text) g.original_text = g.text; g.text = t; g.status = "edited"; save(); renderGoals(); }
@@ -110,7 +148,8 @@
       }
       list.appendChild(li);
     });
-    $("run-go").disabled = active().length === 0 || !!controller;
+    $("run-go").disabled = accepted().length === 0 || !!controller;
+    $("steer").textContent = accepted().length ? "These goals steer the whole night." : "These goals steer the whole night. Accept at least one suggestion or add a goal of your own first.";
   }
   $("goal-add").addEventListener("click", function () {
     var t = $("goal-new").value.replace(/\s+/g, " ").trim().slice(0, 200);
@@ -160,15 +199,16 @@
   function renderNote() { var n = $("feedback-note"); n.hidden = !state.note; clear(n); if (state.note) n.appendChild(el("span", {}, el("strong", { text: "Changed because of your feedback: " }), state.note)); }
   function renderRunState() {
     $("run-state").textContent = controller ? "The crew is at work. Keep this tab open." : [state.headline, state.costLine].filter(Boolean).join(" ");
-    $("run-go").hidden = !!controller; $("run-stop").hidden = !controller; $("run-go").disabled = active().length === 0;
+    $("run-go").hidden = !!controller; $("run-stop").hidden = !controller; $("run-go").disabled = accepted().length === 0;
   }
   $("run-stop").addEventListener("click", function () { if (controller) controller.abort(); });
   $("run-go").addEventListener("click", function () {
-    var p = state.project; if (!p || !active().length) return;
+    var p = state.project; if (!p || !accepted().length) return;
     var budget = parseFloat(($("run-budget").value || "").replace(",", "."));
     var payload = { project: {
-      name: (p.card && p.card.name) || p.url, url: p.url, one_liner: (p.card && p.card.one_liner) || "", audience: (p.card && p.card.audience) || "",
-      goals: active().map(function (g) { return g.text; }), feedback: state.feedback.slice(-20),
+      name: (p.card && p.card.name) || p.url, url: p.url, one_liner: (p.card && p.card.one_liner) || "", problem: (p.card && p.card.problem) || "",
+      pitch_line: p.pitch_confirmed ? (p.pitch_line || "") : "", audience: (p.card && p.card.audience) || "",
+      goals: accepted().map(function (g) { return g.text; }), feedback: state.feedback.slice(-20),
       seen_urls: Object.keys(state.seen).slice(-200), excluded_urls: state.excludedUrls.slice(-100), excluded_authors: state.excludedAuthors.slice(-100)
     } };
     if (isFinite(budget) && budget >= 0) payload.budget = budget;

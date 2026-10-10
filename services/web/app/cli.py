@@ -1,7 +1,7 @@
 """Operator tools on the command line: create a workspace, confirm goals, give feedback, look at a run and the ledger.
 
     python -m app.cli intake <url> [--description "..."] [--goal "..."]...
-    python -m app.cli confirm <project-id>
+    python -m app.cli confirm <project-id> [--all]    confirms the goals you accepted; --all accepts every open suggestion first
     python -m app.cli feedback <project-id> <card-id> up|down [--comment "..."]
     python -m app.cli show <project-id>            the last run: crew, cards, cost line
     python -m app.cli ledger [--project <id>]      ledger lines, newest first
@@ -19,7 +19,7 @@ import sys
 
 from . import fetcher, intake, logsafe, proposer
 from .repo import now, open_repo
-from .store import ProjectStore
+from .store import NoGoalsAccepted, PitchInvalid, ProjectStore
 
 
 def _repo_and_store():
@@ -40,13 +40,20 @@ async def cmd_intake(args) -> int:
         return 2
     pid = store.create(args.owner, data)
     repo.append_ledger(intake.intake_ledger_line(pid, "private", usage, started))
-    print(json.dumps({"project_id": pid, "card": data["card"], "goals": [{"id": g["id"], "text": g["text"], "status": g["status"], "reason": g["reason"]} for g in data["goals"]]}, ensure_ascii=False, indent=2))
+    print(json.dumps({"project_id": pid, "card": data["card"], "pitch_line": data.get("pitch_line"), "goals": [{"id": g["id"], "text": g["text"], "status": g["status"], "reason": g["reason"]} for g in data["goals"]]}, ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_confirm(args) -> int:
     _, store = _repo_and_store()
-    project = store.confirm_goals(args.project)
+    try:
+        project = store.confirm_goals(args.project, accept_all=args.all)
+    except NoGoalsAccepted:
+        print("error: no goal is accepted yet. Accept or write at least one, or use --all to accept every suggestion.")
+        return 2
+    except PitchInvalid as exc:
+        print(f"error: the project sentence cannot be confirmed: {exc}")
+        return 2
     print(json.dumps({"confirmed": [g["text"] for g in project["confirmed_goals"]]}, ensure_ascii=False))
     return 0
 
@@ -122,6 +129,7 @@ def main(argv=None) -> int:
     p.add_argument("--owner", default="cli@local")
     p = sub.add_parser("confirm")
     p.add_argument("project")
+    p.add_argument("--all", action="store_true", help="accept every open suggestion, then confirm")
     p = sub.add_parser("feedback")
     p.add_argument("project")
     p.add_argument("card")

@@ -12,10 +12,9 @@
     <span class="hint">Landing page, repo or newsletter archive.</span>
     <input id="url" name="url" type="text" inputmode="url" autocomplete="url" required value="{{ form.url or '' }}" placeholder="https://">
 
-    {% if need_description %}
-    <label for="description">Your project in one sentence</label>
-    <input id="description" name="description" type="text" maxlength="1000" required autofocus value="{{ form.description or '' }}">
-    {% endif %}
+    <label for="description">What does it do, and for whom?{% if not need_description %} <span class="optional">Optional</span>{% endif %}</label>
+    <span class="hint">One or two sentences in your own words. {% if need_description %}I need them: I could not read your page.{% else %}Optional, but it steers the whole night.{% endif %}</span>
+    <input id="description" name="description" type="text" maxlength="1000" {% if need_description %}required autofocus{% endif %} value="{{ form.description or '' }}">
 
     <label for="goals">What should come out of this? <span class="optional">Optional</span></label>
     <span class="hint">In your own words, one per line, as many as you like. Or leave it empty and I suggest goals and tell you why.</span>

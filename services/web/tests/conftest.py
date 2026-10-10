@@ -32,10 +32,12 @@ def make_proposal(goal_texts=("First users", "Feedback from newsletter writers")
         project=ProjectCard(
             name="Notecast",
             one_liner="Turns daily notes into a weekly issue.",
+            problem="You write every day and nothing ever gets sent.",
             audience="Probably newsletter writers who keep daily notes.",
             observations=["No prices on the page.", "Waitlist form."],
         ),
         goals=[GoalSuggestion(text=t, reason=f"Because of {t}.") for t in goal_texts],
+        pitch_line="It turns your daily notes into a weekly issue you can send.",
     )
 
 

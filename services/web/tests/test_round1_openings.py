@@ -1,4 +1,4 @@
-"""Round 1 (A1 pitch and link, A2 where it belongs, A3 freshness): fixed texts and checks in code, no model needed."""
+"""Openings (pitch and link, where a card belongs, freshness): fixed texts and checks in code, no model needed."""
 
 import asyncio
 import re
@@ -302,7 +302,7 @@ def test_the_curator_gets_age_and_replies_per_finding_and_the_call_count_is_unch
     assert [s for s, _ in gw.calls].count("curate") == 1
 
 
-# --- revision after the examiner ---------------------------------------------------------------------------
+# --- revision after review---------------------------------------------------------------------------
 def test_a_project_on_a_shared_host_is_not_named_after_the_host():
     p = fakes.project_input(name="Notecast", url="https://github.com/me/notecast")
     assert "github" not in [n.lower() for n in p.names()] and "Notecast" in p.names()

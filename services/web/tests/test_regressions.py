@@ -171,7 +171,7 @@ def test_a_waiter_that_sees_the_holder_finish_refuses_instead_of_starting_a_seco
 def test_a_partial_night_with_cards_counts_as_a_night_that_ran(repo, pid):
     from app import night
 
-    repo.create_run({"run_id": "run-part-0002", "project_id": pid, "owner": "o", "status": "partial", "started_at": now(), "cards": [{"id": "k1"}]})
+    repo.create_run({"run_id": "run-part-0002", "project_id": pid, "owner": "o", "trigger": "schedule", "status": "partial", "started_at": now(), "cards": [{"id": "k1"}]})
     assert night._recent_run(repo, pid) is True
 
 

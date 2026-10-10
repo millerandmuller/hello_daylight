@@ -67,29 +67,53 @@ def test_long_goal_is_truncated(client):
     assert len(_goals(token)[-1]["text"]) == 200
 
 
-def test_confirm_accepts_proposed_and_snapshots(client):
+def test_confirm_takes_only_what_the_owner_accepted(client):
     token = _project(client, goals="Customers for the Pro plan")
     goals = _goals(token)
-    client.post(f"/p/{token}/goals/{goals[1]['id']}/remove", headers=HX)
+    assert [g["status"] for g in goals] == ["accepted", "proposed", "proposed"]
+    client.post(f"/p/{token}/goals/{goals[2]['id']}/accept", headers=HX)
     r = client.post(f"/p/{token}/confirm", headers=HX)
     assert "Confirmed" in r.text and "2 goals" in r.text
     project = main.app.state.store.get(token)
     assert [g["text"] for g in project["confirmed_goals"]] == ["Customers for the Pro plan", goals[2]["text"]]
     assert [g["origin"] for g in project["confirmed_goals"]] == ["user", "agent"]
-    assert all(g["status"] in ("accepted", "removed") for g in project["goals"])
+    assert [g["status"] for g in project["goals"]] == ["accepted", "proposed", "accepted"]  # the unanswered suggestion stays a suggestion
 
     r = client.post(f"/p/{token}/goals", data={"text": "Podcast interview"}, headers=HX)
     assert "changed the goals since confirming" in r.text
 
 
-def test_confirm_empty_list_lets_planner_decide(client):
+def test_confirm_with_nothing_accepted_is_refused_and_says_why(client):
     token = _project(client)
-    for g in _goals(token):
-        client.post(f"/p/{token}/goals/{g['id']}/remove", headers=HX)
-    assert "let the planner decide" in client.get(f"/p/{token}").text
+    assert all(g["status"] == "proposed" for g in _goals(token))
+    page = client.get(f"/p/{token}").text
+    assert "These goals steer the whole night." in page and "<button type=\"button\" disabled>Confirm</button>" in page
     r = client.post(f"/p/{token}/confirm", headers=HX)
-    assert "goals the planner picks and explains" in r.text
-    assert main.app.state.store.get(token)["confirmed_goals"] == []
+    assert "Accept at least one suggestion" in r.text
+    assert main.app.state.store.get(token).get("confirmed_goals") is None
+
+
+def test_a_workspace_from_before_the_change_reads_without_error(client):
+    token = _project(client)
+    old = {"id": "g_old", "text": "First users", "origin": "agent", "reason": "r", "status": "accepted", "created_at": "2026-10-01T00:00:00"}
+
+    def mutate(d):
+        d["goals"] = [old]
+        d["confirmed_goals"] = [{"id": "g_old", "text": "First users", "origin": "agent", "reason": "r"}]
+        d.pop("pitch_line", None)
+        d.pop("pitch_confirmed_at", None)
+        d["card"].pop("problem", None)
+
+    main.app.state.store.update(token, mutate)
+    page = client.get(f"/p/{token}")
+    assert page.status_code == 200 and "Confirmed." in page.text
+    assert "No confirmed project sentence yet. Add one and every draft uses your words." in page.text
+
+
+def test_confirm_all_is_the_operator_and_test_path(client):
+    token = _project(client)
+    project = main.app.state.store.confirm_goals(token, accept_all=True)
+    assert len(project["confirmed_goals"]) == 2
 
 
 def test_unknown_goal_or_action_is_404(client):

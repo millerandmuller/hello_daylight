@@ -22,8 +22,9 @@
   <label for="p-url">Link to your project</label>
   <span class="hint">Landing page, repo or newsletter archive.</span>
   <input id="p-url" type="text" inputmode="url" placeholder="https://">
-  <div id="p-desc-wrap" hidden>
-    <label for="p-desc">Your project in one sentence</label>
+  <div id="p-desc-wrap">
+    <label for="p-desc">What does it do, and for whom? <span class="optional" id="p-desc-opt">Optional</span></label>
+    <span class="hint">One or two sentences in your own words. Optional, but it steers the whole night.</span>
     <input id="p-desc" type="text" maxlength="1000">
   </div>
   <label for="p-goals">What should come out of this? <span class="optional">Optional</span></label>
@@ -36,8 +37,10 @@
 <section class="panel" id="goals-panel" hidden aria-labelledby="goals-h">
   <h2 id="goals-h">3. Goals</h2>
   <div id="project-card"></div>
-  <p class="hint">Keep, change or remove any suggestion, and add your own.</p>
+  <div id="pitch-box"></div>
+  <p class="hint">Accept the suggestions you want, change or remove the rest, and add your own. A suggestion you did not accept is not used.</p>
   <ul class="goal-list" id="goal-list"></ul>
+  <p class="steer" id="steer">These goals steer the whole night.</p>
   <div class="goal-add"><label class="visually-hidden" for="goal-new">Add a goal</label><input id="goal-new" maxlength="200" placeholder="Beta testers in the DACH region"><button type="button" id="goal-add" class="secondary">Add goal</button></div>
 </section>
 

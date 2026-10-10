@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field, ValidationError
 from . import auth, cards as cardtext, config, fetcher, intake, keycheck, launcher, logsafe, proposer, service
 from .engine import ProjectInput
 from .repo import NotFound, now, open_repo, parse_ts
-from .store import MAX_GOALS, GoalLimit, ProjectStore
+from .prompts import lint_pitch
+from .store import MAX_GOALS, GoalLimit, NoGoalsAccepted, PitchInvalid, ProjectStore
 
 log = logging.getLogger("daylight.web")
 HERE = Path(__file__).parent
@@ -147,8 +148,15 @@ def _confirm_state(project: dict) -> str:
     confirmed = project.get("confirmed_goals")
     if confirmed is None:
         return "none"
-    current = [g["text"] for g in ProjectStore.active_goals(project)]
-    return "current" if current == [g["text"] for g in confirmed] else "stale"
+    current = [g["text"] for g in ProjectStore.accepted_goals(project)]
+    if current != [g["text"] for g in confirmed]:
+        return "stale"
+    return "stale" if _pitch_pending(project) else "current"
+
+
+def _pitch_pending(project: dict) -> bool:
+    """A project sentence is on the page that the owner has not confirmed yet."""
+    return bool(project.get("pitch_line")) and not project.get("pitch_confirmed_at")
 
 
 def _project_context(project: dict, user: auth.User, **extra) -> dict:
@@ -157,6 +165,8 @@ def _project_context(project: dict, user: auth.User, **extra) -> dict:
         "user": user,
         "goals": project.get("goals", []),
         "active_count": len(ProjectStore.active_goals(project)),
+        "accepted_count": len(ProjectStore.accepted_goals(project)),
+        "pitch_pending": _pitch_pending(project),
         "max_goals": MAX_GOALS,
         "confirm_state": _confirm_state(project),
         **extra,
@@ -297,6 +307,33 @@ def goals_confirm(request: Request, token: str):
         project = store().confirm_goals(token, owner=user.email)
     except NotFound:
         return _not_found(request)
+    except NoGoalsAccepted:
+        return _goals_response(request, token, _own(token, user), user, goal_error="Accept at least one suggestion or add a goal of your own first. These goals steer the whole night.")
+    except PitchInvalid as exc:
+        return _goals_response(request, token, _own(token, user), user, pitch_error=exc.problems, editing_pitch=True)
+    return _goals_response(request, token, project, user)
+
+
+@app.get("/p/{token}/pitch/edit", response_class=HTMLResponse)
+def pitch_edit_form(request: Request, token: str):
+    user = user_of(request)
+    try:
+        project = _own(token, user)
+    except NotFound:
+        return _not_found(request)
+    return templates.TemplateResponse(request, "_goals.html", _project_context(project, user, editing_pitch=True))
+
+
+@app.post("/p/{token}/pitch", response_class=HTMLResponse)
+def pitch_save(request: Request, token: str, text: str = Form("")):
+    user = user_of(request)
+    try:
+        project = store().set_pitch(token, text, owner=user.email)
+    except NotFound:
+        return _not_found(request)
+    except PitchInvalid as exc:
+        project = _own(token, user)
+        return templates.TemplateResponse(request, "_goals.html", _project_context(project, user, editing_pitch=True, pitch_error=exc.problems, pitch_draft=" ".join(text.split())))  # 200 on purpose: htmx does not swap a 4xx
     return _goals_response(request, token, project, user)
 
 
@@ -568,6 +605,21 @@ async def public_key_check(request: Request):
     return {"ok": True}
 
 
+class PublicPitchCheck(BaseModel):
+    text: str = Field(default="", max_length=600)
+    name: str = Field(default="", max_length=120)
+
+
+@app.post("/api/public/pitch-check")
+async def public_pitch_check(request: Request, body: PublicPitchCheck):
+    """The same mechanical rules as in the private mode. Stores nothing, calls no model."""
+    if not _check_window.allow(_client_ip(request), 60):
+        return JSONResponse({"error": "Too many checks. Wait a bit."}, status_code=429)
+    text = " ".join(body.text.split())
+    problems = lint_pitch(text, [n for n in (body.name, body.name.split(":")[0].split(" - ")[0].strip()) if n]) if text else []
+    return {"ok": not problems, "problems": problems}
+
+
 class PublicIntake(BaseModel):
     url: str = Field(default="", max_length=2000)
     goals: str = Field(default="", max_length=4000)
@@ -597,7 +649,7 @@ async def public_intake(request: Request, body: PublicIntake):
     except Exception:  # noqa: BLE001 - accounting must not break the visitor's intake
         log.warning("public intake ledger line failed")
     data.pop("page", None)  # the browser needs the card and the goals, not the page text
-    return {"url": data["url"], "card": data["card"], "goals": data["goals"], "proposal_error": data["proposal_error"], "fetch_error": data["fetch_error"], "description": data["description"], "cost_eur": (usage or {}).get("cost_eur", 0.0)}
+    return {"url": data["url"], "card": data["card"], "pitch_line": data.get("pitch_line") or "", "goals": data["goals"], "proposal_error": data["proposal_error"], "fetch_error": data["fetch_error"], "description": data["description"], "cost_eur": (usage or {}).get("cost_eur", 0.0)}
 
 
 class PublicFeedback(BaseModel):
@@ -613,6 +665,8 @@ class PublicProject(BaseModel):
     name: str = Field(max_length=120)
     url: str = Field(default="", max_length=2000)
     one_liner: str = Field(default="", max_length=500)
+    problem: str = Field(default="", max_length=500)
+    pitch_line: str = Field(default="", max_length=600)  # only a sentence the visitor confirmed in the browser
     audience: str = Field(default="", max_length=300)
     goals: list[str] = Field(default_factory=list, max_length=20)
     feedback: list[PublicFeedback] = Field(default_factory=list, max_length=20)
@@ -642,13 +696,18 @@ async def public_run(request: Request, body: PublicRun):
         return JSONResponse({"error": "Add at least one goal first."}, status_code=422)
     if not _run_window.allow(_client_ip(request), config.PUBLIC_RATE_PER_IP_PER_HOUR):
         return JSONResponse({"error": "Too many runs from this address this hour. Try again later."}, status_code=429)
+    pitch = " ".join(body.project.pitch_line.split())
+    if pitch:
+        problems = lint_pitch(pitch, [n for n in (body.project.name, body.project.name.split(":")[0].split(" - ")[0].strip()) if n])
+        if problems:
+            return JSONResponse({"error": "The project sentence needs a change: " + "; ".join(problems) + "."}, status_code=422)
     slot = await asyncio.to_thread(repo().acquire_slot, config.PUBLIC_MAX_CONCURRENT, 1800.0)
     if slot is None:
         return JSONResponse({"error": "Three runs are going right now. Try again in a few minutes."}, status_code=429)
 
     p = body.project
     pinput = ProjectInput(
-        name=p.name, url=p.url, one_liner=p.one_liner, audience=p.audience, goals=[g.strip()[:200] for g in p.goals if g.strip()],
+        name=p.name, url=p.url, one_liner=p.one_liner, problem=p.problem.strip(), pitch_line=pitch, audience=p.audience, goals=[g.strip()[:200] for g in p.goals if g.strip()],
         feedback=[f.model_dump() for f in p.feedback], seen_urls=set(p.seen_urls), excluded_urls=set(p.excluded_urls),
         excluded_authors={a.lower() for a in p.excluded_authors},
     )
