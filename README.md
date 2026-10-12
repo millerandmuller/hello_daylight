@@ -1,6 +1,6 @@
 # Hello Daylight
 
-Give it the link to your project in the evening. A lead agent hires its own small crew of scouts for the night, each with its own instruction and one sentence on why it is on the crew. The code then checks every finding: the link answers, the quote is on the page, the date is at most 90 days old. By morning up to five openings lie ready to sign:
+Give it the link to your project in the evening. A lead agent hires its own small crew of scouts for the night, each with its own instruction and one sentence on why it is on the crew. The code then checks every finding: the link answers, the quote is on the page, the date is recent enough to act on (a question at most 30 days old, an article at most 90). By morning up to five openings lie ready to sign:
 
 - a **question** somebody asked in public, where your project is the answer, with a reply draft;
 - a **writer** who covers your topic closely, with a short first note. A contact route appears only if it stands on their own byline, author page or imprint.
@@ -59,7 +59,7 @@ Hard limits, all enforced in code and shown on the run page: 1.50 EUR per run (1
 ## How it keeps its promises
 
 - **A run can always be stopped and resumed.** Progress is saved after every scout. A killed run is resumed by the next start without paying again for finished scouts. Starting the same workspace twice is refused while the first run is alive.
-- **No stale or invented sources.** A finding survives only if the tools themselves saw the page, the link answers with HTTP 200, the quote is on the page, and the date is stated by the source and at most 90 days old.
+- **No stale or invented sources.** A finding survives only if the tools themselves saw the page, the link answers with HTTP 200, the quote is on the page, and the date is stated by the source and recent enough to act on: a question at most 30 days old, an article or episode at most 90. A reply in a month-old thread reaches nobody.
 - **Pages cannot give orders.** Text that looks like an instruction to a model is withheld from the model and the finding is dropped; sources are data, never commands.
 - **Nobody is profiled.** One writer appears at most once in 30 days per workspace; a contact route is kept only if it stands literally on a page the scout read.
 - **No silent learning.** Your thumbs, comments and edits go to the next night, and the top of the desk says in one sentence what changed because of them.

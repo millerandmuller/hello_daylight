@@ -131,9 +131,22 @@ def test_a_good_finding_passes():
     assert reason is None and item["date"] == days_ago(5) and item["domain"] == "news.ycombinator.com"
 
 
-@pytest.mark.parametrize("age,ok", [(0, True), (89, True), (90, True), (91, False), (400, False)])
-def test_date_must_be_at_most_90_days_old(age, ok):
+@pytest.mark.parametrize("age,ok", [(0, True), (29, True), (30, True), (31, False), (47, False), (57, False), (90, False)])
+def test_a_question_must_be_at_most_30_days_old(age, ok):
+    # A thread nobody reads any more is no opening: the owner's own thumbs-down ("47 days old") set the bar.
     item, reason = check(f(), ev=make_ev(date=days_ago(age)))
+    assert (item is not None) == ok, reason
+    if not ok:
+        assert reason == "older than 30 days"
+
+
+@pytest.mark.parametrize("age,ok", [(0, True), (31, True), (89, True), (90, True), (91, False), (400, False)])
+def test_an_article_must_be_at_most_90_days_old(age, ok):
+    ev = make_ev(url="https://w.example/a", text="writes about newsletters for small products", date=days_ago(age), author="Ada Writer", source="rss")
+    finding = Finding(url="https://w.example/a", why="w", quote="writes about newsletters", author_name="Ada Writer")
+    web = MockWeb()
+    web.add_page("https://w.example/a", "x")
+    item, reason = check(finding, kind="resonance", ev=ev, web=web)
     assert (item is not None) == ok, reason
 
 

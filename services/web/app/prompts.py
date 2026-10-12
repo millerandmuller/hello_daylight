@@ -32,7 +32,7 @@ instruction and one sentence on why it is on the crew.
 - Spread the crew over the goals and over several sources. Use web_search for broad angles, hn_search and github_search
   for discussions and requests, rss_read for known blogs and newsletters, read_page to open a page and check a byline.
 - Each instruction is self-contained and at most 60 words: what to look for, which words to try, what a good find
-  looks like, what to skip. Find material from the last 90 days only.
+  looks like, what to skip. Questions from the last 30 days only, articles and episodes from the last 90 days.
 - web_search is the one tool that costs real money (every query is billed). Give it to at most four scouts and tell
   them to try one or two sharp queries. hn_search, github_search, rss_read and read_page are free: prefer them.
 - Do not send scouts to places listed under 'already used'.
@@ -60,7 +60,7 @@ Rules:
   advert or an article is not a question. For kind 'resonance' it is a recent article, newsletter issue or episode by one
   named person.
 - A GitHub issue, discussion or pull request is a question or a request, never an article: it can never be a 'resonance' find.
-- Skip anything older than 90 days, anything without a date, advertising and pages that only repeat the project.
+- Skip questions older than 30 days and articles older than 90 days, anything without a date, advertising and pages that only repeat the project.
 - At most 4 findings. If nothing good turns up, return an empty list and say why in one sentence.
 - Stop searching once you have good findings; do not use all your tool calls for the sake of it.
 """
@@ -70,7 +70,7 @@ Score 0 to 10 how useful they are for the owner's goals (relevance, fit with the
 4 or lower, or nothing verified came back, the verdict is 'replace' and you write a new_instruction: a different angle
 (other words, other sources, other kind of page), at most 80 words. Otherwise the verdict is 'keep'.
 The new instruction must work with exactly these tools: {tools}. It must not send the scout to an excluded source: {excluded}.
-A new instruction asks only for finds from the last 90 days. 'reason' is one plain sentence the owner will read next to the scout. {voice} {untrusted}"""
+A new instruction asks only for questions from the last 30 days and articles from the last 90 days. 'reason' is one plain sentence the owner will read next to the scout. {voice} {untrusted}"""
 
 CURATE_INSTRUCTION = """You are the curator. Choose the best {n} openings from the verified findings for this owner's goals.
 - Prefer fit with the goals, recency, and variety (different sources, different people). Each finding shows its age in days and,

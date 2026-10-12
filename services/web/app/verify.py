@@ -1,7 +1,8 @@
 """N4: plain code, no model. A scout's claim becomes a result only if the facts the TOOLS saw support it.
 
 Checks, in this order: the URL came from a tool; no instruction-like text; the quote is really on the page; the link
-answers with HTTP 200; the date is stated by the source and is at most 90 days old; no duplicate; an author is used at
+answers with HTTP 200; the date is stated by the source and is recent enough to act on (a question at most 30 days
+old, an article at most 90); no duplicate; an author is used at
 most once in 30 days; a contact route is kept only if it stands literally on a page the scout read.
 """
 
@@ -14,7 +15,8 @@ from .evidence import Evidence, EvidenceItem, canonical_url, domain_of, injectio
 from .schemas import Finding
 from .web import SafeHttp
 
-MAX_AGE_DAYS = 90
+MAX_AGE_DAYS = 90  # an article or episode (kind 'resonance')
+QUESTION_MAX_AGE_DAYS = 30  # a thread to reply in: after a month nobody reads the answer
 AUTHOR_COOLDOWN_DAYS = 30
 MIN_QUOTE_CHARS = 12
 _GITHUB_THREAD = re.compile(r"^https?://(?:www\.)?github\.com/[^/]+/[^/]+/(?:issues|pull|discussions)/\d+", re.I)
@@ -43,7 +45,11 @@ class VerifyContext:
     today: date = field(default_factory=today_utc)
 
 
-def _age_problem(day: str | None, today: date) -> str | None:
+def max_age_days(kind: str) -> int:
+    return QUESTION_MAX_AGE_DAYS if kind == "question" else MAX_AGE_DAYS
+
+
+def _age_problem(day: str | None, today: date, max_age: int = MAX_AGE_DAYS) -> str | None:
     if not day:
         return "the source states no date"
     try:
@@ -52,8 +58,8 @@ def _age_problem(day: str | None, today: date) -> str | None:
         return "the date is not readable"
     if d > today + timedelta(days=1):
         return "the date lies in the future"
-    if (today - d).days > MAX_AGE_DAYS:
-        return f"older than {MAX_AGE_DAYS} days"
+    if (today - d).days > max_age:
+        return f"older than {max_age} days"
     return None
 
 
@@ -96,7 +102,7 @@ async def verify_finding(finding: Finding, kind: str, evidence: Evidence, vc: Ve
             kind = "question"
         else:
             return None, NOT_AN_ARTICLE
-    problem = _age_problem(ev.date, vc.today)
+    problem = _age_problem(ev.date, vc.today, max_age_days(kind))
     if problem:
         return None, problem
     status, final_url = await vc.http.check_link(ev.url)

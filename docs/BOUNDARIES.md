@@ -6,7 +6,7 @@ Rules every Daylight run must follow before a draft reaches the user. If a rule 
 
 - [ ] The source is **public** and reachable by URL (forum thread, news article, blog post, public profile).
 - [ ] It is **about the problem the project solves** — not just a keyword match on the project name or a generic term.
-- [ ] It is **recent enough to act on**: a question still open, an article still current (default: last 90 days).
+- [ ] It is **recent enough to act on**: a question still open (default: last 30 days), an article still current (default: last 90 days).
 - [ ] The place **allows a reply or contact** in public (open thread, author contact shown on the page).
 - [ ] The user's own links and findings always come first; wider search only adds to them, never replaces them.
 - [ ] Not a source: paywalled or login-only content, private groups, scraped personal data, AI-generated content farms.
