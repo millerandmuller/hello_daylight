@@ -81,12 +81,20 @@ def cmd_show(args) -> int:
         return 1
     run = runs[0]
     print(f"run {run['run_id']}  status={run['status']}  {run.get('headline') or ''}")
+    if run.get("mailbox_note"):
+        print(run["mailbox_note"])
     if run.get("feedback_note"):
         print(f"Changed because of your feedback: {run['feedback_note']}")
     for t in run.get("plan_view", []):
         print(f"  {t['id']:>4} [{t['status']:>9}] {t['role']}  -> {t['found']} found  {('(' + t['reason'] + ')') if t['reason'] else ''}")
     for c in run.get("cards", []):
-        print(f"\n--- {c['id']} [{c['kind']}] {c['title']}\n    {c['url']} ({c['date']})\n    {c['draft']}")
+        mailbox = []
+        if c.get("sent_at"):
+            mailbox.append(f"sent {c['sent_at'][:10]}")
+        if c.get("replied_at"):
+            mailbox.append(f"replied {c['replied_at'][:10]}" + (f" ({c['reply_note']})" if c.get("reply_note") else ""))
+        tag = f" [{', '.join(mailbox)}]" if mailbox else ""
+        print(f"\n--- {c['id']} [{c['kind']}] {c['title']}{tag}\n    {c['url']} ({c['date']})\n    {c['draft']}")
     print("\n" + (run.get("cost_line") or ""))
     return 0
 

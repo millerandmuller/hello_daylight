@@ -8,6 +8,7 @@
   <p class="eyebrow">{{ project.card.name }}</p>
   <h1 id="desk-title">This morning</h1>
 
+  {% if run and run.mailbox_note %}<p class="muted small">{{ run.mailbox_note }}</p>{% endif %}
   {% if project.night_note %}<p class="notice" role="status">Last night did not run: {{ project.night_note.reason }}.</p>{% endif %}
   {% if project.confirmed_goals is not none and not project.pitch_confirmed_at %}
   <p class="muted small">No confirmed project sentence yet. Add one and every draft uses your words. <a href="/p/{{ project.id }}#pitch">Add it</a></p>

@@ -72,6 +72,15 @@ Score 0 to 10 how useful they are for the owner's goals (relevance, fit with the
 The new instruction must work with exactly these tools: {tools}. It must not send the scout to an excluded source: {excluded}.
 A new instruction asks only for questions from the last 30 days and articles from the last 90 days. 'reason' is one plain sentence the owner will read next to the scout. {voice} {untrusted}"""
 
+SCOUT_RECOVER_INSTRUCTION = """You are a scout on a night crew who just used up every tool call. You cannot search or
+read a page anymore: you must answer now, using only what is listed below.
+- Pick the findings worth keeping from the list below. Each one is a URL a tool already returned in this task.
+- Each finding: url, why (one sentence, only facts the page shows), quote (a short passage copied word for word from
+  its text, at most 200 characters). For a 'resonance' task also give author_name and, only if the text literally
+  shows it, contact_route and contact_source_url. Never guess a route.
+- At most 4 findings. If nothing below is good enough, return an empty list and say why in one sentence.
+- {untrusted}"""
+
 CURATE_INSTRUCTION = """You are the curator. Choose the best {n} openings from the verified findings for this owner's goals.
 - Prefer fit with the goals, recency, and variety (different sources, different people). Each finding shows its age in days and,
   where the source reports it, its number of replies. At otherwise equal relevance, put the younger thread before the older one:
@@ -135,7 +144,24 @@ Rules: {rules}
 Every claim about the source must be backed by the source facts given. Every claim about the project must be backed by
 the project card. Known problems found by a mechanical check (they are true, include them): {lint}
 Reject a draft that names the technology instead of the benefit when it describes the project (for example "AI sub-agents" or
-"overnight crew"): give one sentence of reason. Return ok=true only if there are no problems at all. Otherwise list at most three concrete fixes. {untrusted}"""
+"overnight crew"): give one sentence of reason. {plain_rule}Return ok=true only if there are no problems at all. Otherwise list at most three concrete fixes. {untrusted}"""
+
+CRITIC_PLAIN_RULE = (
+    "This reply is posted in a stranger's issue tracker and by design carries no project name, project sentence or "
+    "link: that absence is intentional, never a defect. Never ask for it, never call the draft incomplete or needing "
+    "a look because of it. "
+)
+
+# Backstop for CRITIC_PLAIN_RULE: a tiny classification call, not a text pattern, decides whether one editor comment
+# may be dropped from a plain-source card. A pattern match on free model text cannot generalise to paraphrases in
+# either direction; this call can, and fails closed (comment stays visible) on any error or unclear answer.
+MISSING_PROJECT_CHECK_INSTRUCTION = (
+    "You check one editor's comment about a reply draft in a stranger's issue tracker. Decide only whether this "
+    "ONE comment's entire complaint is that the reply does not name the project, state in one sentence what it "
+    "does, or link to it. If the comment raises anything else at all — a wrong, fake, outdated, suspicious or "
+    "incorrect detail about the project; tone; missing evidence; length; anything not about the project's mention "
+    "being absent — answer false. When unsure, answer false."
+)
 
 DRAFT_RULES = (
     "plain and short; second person; no exclamation marks; no emojis; no marketing words; the project is not named in the first "

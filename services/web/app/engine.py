@@ -19,9 +19,9 @@ from datetime import date, datetime, timezone
 from . import cards as cardtext
 from . import config, prompts
 from .evidence import EXCLUDED_SOURCE_NAMES, Evidence, canonical_url, domain_of, excluded_source_mentioned, untrusted_block
-from .llm import CallFailed, ModelGateway
+from .llm import AgentResult, CallFailed, ModelGateway
 from .meter import REASON_TEXT, RunMeter, RunStopped
-from .schemas import Critique, Curation, Draft, Evaluation, Plan, ScoutOutput
+from .schemas import Critique, Curation, Draft, Evaluation, MissingProjectCheck, Plan, ScoutOutput
 from .tools import TOOL_NAMES, ToolContext, make_tools
 from .verify import AGGREGATORS, VerifyContext, verify_findings
 from .web import SafeHttp
@@ -60,6 +60,7 @@ class ProjectInput:
     recent_authors: dict[str, str] = field(default_factory=dict)
     used_sources: list[str] = field(default_factory=list)  # domains of recent cards, for the planner
     project_id: str | None = None
+    mailbox_note: str = ""  # "Since last night: ..." - display only, never read by a plan, scout or writer
 
     def names(self) -> list[str]:
         host = domain_of(self.url).split(".")[0] if self.url else ""
@@ -445,13 +446,19 @@ class NightRun:
                 output_schema=ScoutOutput, deadline_s=self.contract.scout_deadline_s, max_model_calls=10,
             )
         except CallFailed as exc:  # R3: degrade, name the missing part, keep going
-            t["status"] = "missing"
-            t["reason"] = f"did not finish ({exc.reason})"
-            self.notes.add(f"{spec['role']}: {t['reason']}")
-            await self._checkpoint()
-            await self._flush_view(status="running")
-            self._event("task", id=tid, status="missing", reason=t["reason"])
-            return
+            # A scout that used up its tool calls (ctx.over_limit) but kept trying tools instead of answering can
+            # burn through max_model_calls before ever producing a final answer (reason "limit"). It already has
+            # verifiable finds in `ev`: one more call, with no tools, asks it to answer from those instead of
+            # ending as a missing part.
+            res = await self._recover_scout(ev, spec, tid) if exc.reason == "limit" and ev.items else None
+            if res is None:
+                t["status"] = "missing"
+                t["reason"] = f"did not finish ({exc.reason})"
+                self.notes.add(f"{spec['role']}: {t['reason']}")
+                await self._checkpoint()
+                await self._flush_view(status="running")
+                self._event("task", id=tid, status="missing", reason=t["reason"])
+                return
         items, dropped = await verify_findings(res.parsed.findings, spec["kind"], ev, self.vc)
         for sus in ctx.suspicious:
             dropped.append({"url": sus["url"], "reason": "suspicious: text that looks like an instruction to a model"})
@@ -462,6 +469,24 @@ class NightRun:
         await self._checkpoint()
         await self._flush_view(status="running")
         self._event("task", id=tid, status="done", found=len(t["items"]))
+
+    async def _recover_scout(self, ev: Evidence, spec: dict, tid: str) -> AgentResult | None:
+        """One more call for a scout that ran out of tool calls: no tools, so it must answer now with
+        whatever it already gathered. Cheap tier, short budget: the sunk calls already cost more than this."""
+        items = list(ev.items.values())[:12]
+        listing = "\n\n".join(
+            f"url: {it.url}\ntitle: {it.title}\ndate: {it.date or '-'}\nauthor: {it.author or '-'}\n" + untrusted_block("PAGE", it.text[:500])
+            for it in items
+        )
+        instr = prompts.SCOUT_RECOVER_INSTRUCTION.format(untrusted=prompts.UNTRUSTED_RULE)
+        user = f"Task kind: {spec['kind']}\nWhat you already gathered before running out of tool calls:\n\n{listing}"
+        try:
+            return await self.gateway.run_agent(
+                step="scout_recover", tier="cheap", name=f"scout_recover_{tid}", instruction=instr, user_text=user,
+                output_schema=ScoutOutput, deadline_s=60, max_model_calls=2,
+            )
+        except CallFailed:
+            return None
 
     # ------------------------------------------------------------------------------------------
     # N5 + N5b: the lead judges, weak scouts are replaced (capped)
@@ -682,6 +707,22 @@ class NightRun:
         _raise_first(results)
         self.S["stage"] = "done"
 
+    async def _classify_missing_project(self, point: str) -> bool:
+        """Whether this one editor comment complains ONLY that the project is absent from a plain-source reply
+        (the point of such a reply, not a defect). A model call, not a text pattern: a pattern cannot tell this
+        apart from an unrelated complaint for arbitrary wording in either direction (see `cards.py` module note).
+        Fails CLOSED on any error: the comment stays on the card rather than silently vanish. Cheap tier, a
+        one-word answer — negligible against the run's cost (same argument as `_recover_scout`)."""
+        try:
+            res = await self.gateway.run_agent(
+                step="missing_project_check", tier="cheap", name="missing_project_check",
+                instruction=prompts.MISSING_PROJECT_CHECK_INSTRUCTION, user_text=point,
+                output_schema=MissingProjectCheck, deadline_s=30, max_model_calls=2,
+            )
+            return bool(res.parsed.only_missing_project)
+        except CallFailed:
+            return False
+
     async def _write_card(self, item: dict) -> dict:
         c = self.contract
         rank = (self.S["picks"] or []).index(item) if item in (self.S["picks"] or []) else 99
@@ -717,7 +758,10 @@ class NightRun:
             if lint and round_no < c.max_rounds_write:
                 problems = lint  # a mechanical failure needs no editor
                 continue
-            crit_instr = prompts.CRITIC_INSTRUCTION.format(rules=prompts.DRAFT_RULES, lint="; ".join(lint) or "none", untrusted=prompts.UNTRUSTED_RULE)
+            crit_instr = prompts.CRITIC_INSTRUCTION.format(
+                rules=prompts.DRAFT_RULES, lint="; ".join(lint) or "none", untrusted=prompts.UNTRUSTED_RULE,
+                plain_rule=prompts.CRITIC_PLAIN_RULE if plain else "",
+            )
             cres = await self.gateway.run_agent(step="critic", tier="mid", name="critic", instruction=crit_instr, user_text=f"{base}\n\nDraft to check:\n{draft}", output_schema=Critique, deadline_s=90, max_model_calls=2)
             critic_points = [] if cres.parsed.ok else list(cres.parsed.problems or [])[:3]  # the verdict on THIS draft; only the last one is kept
             if cres.parsed.ok and not lint:
@@ -729,7 +773,12 @@ class NightRun:
             draft = cardtext.strip_project(draft, names, self.p.url, self.p.pitch_line) or draft  # nothing left: kept, and the lint below flags it on the card
         left = self._lint(draft, names, plain, card_id, self.p.pitch_line)
         if plain:  # the editor may complain that the project is missing: for a reply in a stranger's tracker that is the point
-            critic_points = [pt for pt in critic_points if not cardtext.complains_project_missing(pt, names)]
+            kept = []
+            for pt in critic_points:
+                if await self._classify_missing_project(pt):
+                    continue  # the model call decides, never a text pattern — see its own docstring
+                kept.append(pt)
+            critic_points = kept
         left += [pt for pt in critic_points if pt not in left]  # a rejection by the editor is never silent: it stands on the card
         self._drafts[card_id] = draft
         route_words, route_url = cardtext.route_text({"kind": kind, "source": item["source"], "contact_route": item["contact_route"], "url": item["url"]})

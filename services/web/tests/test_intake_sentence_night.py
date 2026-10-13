@@ -736,6 +736,7 @@ def test_an_editor_complaint_about_the_missing_project_does_not_stand_on_a_track
     def setup(gw):
         gw.scout_script["scout_t1"] = gh_scout
         gw.critic_ok = False
+        gw.missing_project_classifier["The draft does not mention the project Notecast at all."] = True
         orig = gw.run_agent
 
         async def spy(**kw):
@@ -750,14 +751,6 @@ def test_an_editor_complaint_about_the_missing_project_does_not_stand_on_a_track
     run(repo, pid, web, gw_setup=setup)
     cards = [c for c in last_run(repo, pid)["cards"] if c["source"] == "github"]
     assert cards and all("tone" in c["needs_attention"] and not any("project" in p.lower() for p in c["needs_attention"]) for c in cards)
-
-
-def test_a_complaint_about_a_claim_on_the_project_stays_but_one_about_its_absence_goes():
-    names = ["Notecast"]
-    assert cardtext.complains_project_missing("The draft does not mention the project Notecast at all.", names)
-    assert cardtext.complains_project_missing("It fails to introduce Notecast.", names)
-    assert not cardtext.complains_project_missing("The draft invents a claim about the project: a config key the issue never mentions.", names)
-    assert not cardtext.complains_project_missing("Tone is too salesy.", names)
 
 
 def test_a_near_copy_of_the_sentence_in_a_tracker_reply_is_found():

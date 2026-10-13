@@ -118,17 +118,17 @@ def remove_link(draft: str, sentence: str) -> str:
     return draft.replace(f"\n\n{sentence}", "").replace(sentence, "").rstrip()
 
 
-_MISSING_PROJECT = re.compile(r"\b(?:not|n't|never|no|without|fails? to|lacks?|missing|omits?)\s+(?:\w+\s+){0,2}?(?:mention\w*|introduc\w*|includ\w*|nam\w+|describ\w*|referenc\w*|link\w*|promot\w*|present\w*)\b", re.I)
-
-
-def complains_project_missing(point: str, names: list[str]) -> bool:
-    """The editor says the project is absent (negation, a verb of mentioning, then the project). For a reply in a stranger's
-    tracker that is the point, not a problem. A complaint about something the draft claims about the project stays."""
-    for m in _MISSING_PROJECT.finditer(point):
-        after = point[m.end(): m.end() + 40].lower()
-        if "project" in after or any(n and n.lower() in after for n in names):
-            return True
-    return False
+def mailbox_summary(sent: int, replied: int) -> str:
+    """One sentence on what happened at the mailbox since the previous run. Empty when nothing did.
+    Never fed to a model: display only, so this changes no plan, no scout and no draft."""
+    if not sent and not replied:
+        return ""
+    parts = []
+    if sent:
+        parts.append(f"{sent} sent")
+    if replied:
+        parts.append(f"{replied} {'reply' if replied == 1 else 'replies'} came back")
+    return "Since last night: " + ", ".join(parts) + "."
 
 
 def strip_project(text: str, names: list[str], url: str, sentence: str = "") -> str:

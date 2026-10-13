@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from . import cards as cardtext
 from . import config
 from .engine import NightRun, ProjectInput
 from .evidence import canonical_url
@@ -37,6 +38,27 @@ def active_goal_texts(project: dict) -> list[str]:
     if confirmed is not None:
         return [g["text"] for g in confirmed]
     return [g["text"] for g in project.get("goals", []) if g["status"] != "removed"]
+
+
+def mailbox_since(runs: list[dict]) -> str:
+    """What happened at the mailbox since the previous run, as one sentence for the morning desk.
+    `runs` is the newest-first list `build_project_input` already fetched; its first entry is the previous
+    run and its started_at is the cutoff. Display only: never read by a plan, a scout or a writer."""
+    if not runs:
+        return ""
+    cutoff = parse_ts(runs[0].get("started_at"))
+    if cutoff is None:
+        return ""
+    sent = replied = 0
+    for run in runs:
+        for c in run.get("cards", []):
+            sent_at = parse_ts(c.get("sent_at"))
+            if sent_at and sent_at > cutoff:
+                sent += 1
+            replied_at = parse_ts(c.get("replied_at"))
+            if replied_at and replied_at > cutoff:
+                replied += 1
+    return cardtext.mailbox_summary(sent, replied)
 
 
 def build_project_input(repo: Repo, project: dict) -> ProjectInput:
@@ -76,6 +98,7 @@ def build_project_input(repo: Repo, project: dict) -> ProjectInput:
         excluded_authors=excluded_authors,
         recent_authors=dict(seen.get("authors", {})),
         used_sources=list(dict.fromkeys(used)),
+        mailbox_note=mailbox_since(runs),
     )
 
 
@@ -177,19 +200,23 @@ async def run_private(
             continue
         await asyncio.to_thread(_refusal_ledger, repo, project_id, trigger, "already_running", "A run of this project is already in progress.")
         raise RunRefused("already_running", "A run of this project is already in progress.")
+    # built before the run doc exists (or, when resuming, before its status/started_at change): list_runs must still
+    # see the previous run as the newest one, so "since last night" counts from the right point in time
+    pinput = await asyncio.to_thread(build_project_input, repo, project)
     if candidate is None:
         await asyncio.to_thread(
             repo.create_run,
             {"run_id": run_id, "project_id": project_id, "owner": project.get("owner"), "trigger": trigger, "mode": "private",
-             "status": "running", "started_at": now_precise(), "cards": [], "plan_view": [], "feedback_note": "", "notes": [], "cancel_requested": False},
+             "status": "running", "started_at": now_precise(), "cards": [], "plan_view": [], "feedback_note": "", "mailbox_note": pinput.mailbox_note,
+             "notes": [], "cancel_requested": False},
         )
-    else:  # continuing: a failed run is at work again, and its old verdict must not stay on the desk
+    else:  # continuing: a failed run is at work again, and its old verdict must not stay on the desk. Its
+        # mailbox_note was already set when it was first created and is not recomputed: this is the same night.
         await asyncio.to_thread(
             repo.patch_run, run_id, {"status": "running", "reason": "", "headline": "", "resumable": False, "cancel_requested": False}
         )
     if project.get("night_note"):  # this project has a run again: last night's "did not run" line is no longer true
         await asyncio.to_thread(repo.update_project, project_id, lambda d: d.pop("night_note", None))
-    pinput = await asyncio.to_thread(build_project_input, repo, project)
     io = RepoRunIO(repo, project_id, run_id, emit_cb=emit)
     run = NightRun(project=pinput, contract=contract, api_key=key or "", io=io, trigger=trigger, run_id=run_id, http=http, gateway=gateway)
     ledger = await run.execute()

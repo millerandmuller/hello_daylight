@@ -1,0 +1,28 @@
+<div id="signed-cards">
+{% for c in signed %}
+<article class="opening" id="{{ c.id }}-{{ loop.index }}">
+  <p class="eyebrow">{{ "Question" if c.kind == "question" else "Writer" }} · signed {{ c.signed_at[:10] }}</p>
+  <h2><a href="{{ c.url }}" rel="noopener noreferrer" target="_blank">{{ c.title }}</a></h2>
+  {% if c.contact_route %}<p class="small"><span class="label">Contact route:</span> {{ c.contact_route }}</p>{% endif %}
+  <pre class="draft" id="draft-in-{{ loop.index }}">{{ c.draft }}</pre>
+  <button type="button" class="secondary" data-copy-from="draft-in-{{ loop.index }}">Copy</button>
+
+  <div class="card-actions">
+    {% if c.replied_at %}
+      <span class="kept">Reply came back {{ c.replied_at[:10] }}.</span>{% if c.reply_note %} <span class="small muted">{{ c.reply_note }}</span>{% endif %}
+      <form method="post" class="inline" action="/p/{{ project.id }}/cards/{{ c.id }}/unreplied" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/unreplied" hx-target="#signed-cards" hx-swap="outerHTML"><button type="submit" class="link">Undo</button></form>
+    {% elif c.sent_at %}
+      <span class="kept">Sent {{ c.sent_at[:10] }}.</span>
+      <form method="post" class="inline" action="/p/{{ project.id }}/cards/{{ c.id }}/replied" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/replied" hx-target="#signed-cards" hx-swap="outerHTML">
+        <label class="visually-hidden" for="note-{{ c.id }}">Note (optional)</label>
+        <input id="note-{{ c.id }}" name="note" maxlength="300" placeholder="One sentence, optional">
+        <button type="submit" class="secondary">Got a reply</button>
+      </form>
+      <form method="post" class="inline" action="/p/{{ project.id }}/cards/{{ c.id }}/unsent" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/unsent" hx-target="#signed-cards" hx-swap="outerHTML"><button type="submit" class="link">Undo</button></form>
+    {% else %}
+      <form method="post" class="inline" action="/p/{{ project.id }}/cards/{{ c.id }}/sent" hx-post="/p/{{ project.id }}/cards/{{ c.id }}/sent" hx-target="#signed-cards" hx-swap="outerHTML"><button type="submit" class="secondary">Sent</button></form>
+    {% endif %}
+  </div>
+</article>
+{% else %}<p class="muted">Nothing signed yet.</p>{% endfor %}
+</div>

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from . import auth, cards as cardtext, config, fetcher, intake, keycheck, launcher, logsafe, proposer, service
 from .engine import ProjectInput
-from .repo import NotFound, now, open_repo, parse_ts
+from .repo import NotFound, now, now_precise, open_repo, parse_ts
 from .prompts import lint_pitch
 from .store import MAX_GOALS, GoalLimit, NoGoalsAccepted, PitchInvalid, ProjectStore
 
@@ -440,10 +440,23 @@ def _card_of(project: dict, card_id: str) -> tuple[dict, dict]:
     raise NotFound(card_id)
 
 
+MAILBOX_ACTIONS = ("sent", "unsent", "replied", "unreplied")
+
+
+def _signed_cards(token: str) -> list[dict]:
+    signed = []
+    for run in repo().list_runs(token, 20):
+        for c in run.get("cards", []):
+            if c.get("state") == "signed":
+                signed.append(dict(c, run_started=run.get("started_at", "")[:10]))
+    signed.sort(key=lambda c: c.get("signed_at", ""), reverse=True)
+    return signed
+
+
 @app.post("/p/{token}/cards/{card_id}/{action}", response_class=HTMLResponse)
-def card_action(request: Request, token: str, card_id: str, action: str, text: str = Form(""), comment: str = Form("")):
+def card_action(request: Request, token: str, card_id: str, action: str, text: str = Form(""), comment: str = Form(""), note: str = Form("")):
     user = user_of(request)
-    if action not in ("sign", "unsign", "edit", "up", "down", "addlink", "removelink"):
+    if action not in ("sign", "unsign", "edit", "up", "down", "addlink", "removelink") + MAILBOX_ACTIONS:
         return _not_found(request)
     try:
         project = _own(token, user)
@@ -452,6 +465,7 @@ def card_action(request: Request, token: str, card_id: str, action: str, text: s
         return _not_found(request)
     comment = " ".join(comment.split())[:500]
     text = text.strip()[:2000]
+    note = " ".join(note.split())[:300]
 
     def mutate(doc):
         for c in doc.get("cards", []):
@@ -469,12 +483,26 @@ def card_action(request: Request, token: str, card_id: str, action: str, text: s
                 c["draft"], c["link_added"] = cardtext.add_link(c["draft"], c["link_sentence"]), True  # the owner's click, a fixed sentence
             elif action == "removelink" and c.get("link_added"):
                 c["draft"], c["link_added"] = cardtext.remove_link(c["draft"], c["link_sentence"]), False
+            # mailbox: what happened after signing, never sent anywhere, never read by a plan or a scout.
+            # now_precise (microseconds), like a run's started_at: the next run's cutoff compares the two directly.
+            elif action == "sent" and c.get("state") == "signed" and not c.get("sent_at"):
+                c["sent_at"] = now_precise()
+            elif action == "unsent" and c.get("sent_at"):
+                c["sent_at"], c["replied_at"], c["reply_note"] = None, None, ""
+            elif action == "replied" and c.get("sent_at") and not c.get("replied_at"):
+                c["replied_at"], c["reply_note"] = now_precise(), note
+            elif action == "unreplied" and c.get("replied_at"):
+                c["replied_at"], c["reply_note"] = None, ""
 
     repo().mutate_run(run["run_id"], mutate)
     if action == "edit" and text and text != card["draft"]:
         repo().add_feedback(token, {"kind": "edit", "card_id": card_id, "card_title": card["title"], "card_url": card["url"], "card_author": card["author"], "original": card["draft"], "final": text})
     if action in ("up", "down"):
         repo().add_feedback(token, {"kind": action, "comment": comment, "card_id": card_id, "card_title": card["title"], "card_url": card["url"], "card_author": card["author"]})
+    if action in MAILBOX_ACTIONS:
+        if _is_htmx(request):
+            return templates.TemplateResponse(request, "_inbox.html", {"project": _own(token, user), "signed": _signed_cards(token)})
+        return RedirectResponse(f"/p/{token}/inbox#{card_id}", status_code=303)
     if _is_htmx(request):
         project = _own(token, user)
         run = _latest_run(project)
@@ -489,13 +517,7 @@ def inbox(request: Request, token: str):
         project = _own(token, user)
     except NotFound:
         return _not_found(request)
-    signed = []
-    for run in repo().list_runs(token, 20):
-        for c in run.get("cards", []):
-            if c.get("state") == "signed":
-                signed.append(dict(c, run_started=run.get("started_at", "")[:10]))
-    signed.sort(key=lambda c: c.get("signed_at", ""), reverse=True)
-    return templates.TemplateResponse(request, "inbox.html", {"user": user, "project": project, "signed": signed})
+    return templates.TemplateResponse(request, "inbox.html", {"user": user, "project": project, "signed": _signed_cards(token)})
 
 
 # --- admin ------------------------------------------------------------------------------------------

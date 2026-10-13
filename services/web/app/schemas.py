@@ -61,3 +61,11 @@ class Draft(BaseModel):
 class Critique(BaseModel):
     ok: bool = Field(description="True only when the draft follows every rule and every claim is backed by the source.")
     problems: list[str] = Field(description="At most three concrete problems to fix. Empty when ok.")
+
+
+class MissingProjectCheck(BaseModel):
+    only_missing_project: bool = Field(
+        description="True only when this one editor comment's entire complaint is that the project's name, "
+        "one-line description or link is absent from the draft. False for anything else it might also raise "
+        "(a wrong, fake, outdated, suspicious or incorrect detail; tone; evidence; length)."
+    )

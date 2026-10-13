@@ -9,7 +9,7 @@ from app import config
 from app.engine import ProjectInput
 from app.llm import AgentResult, CallFailed
 from app.meter import RunMeter
-from app.schemas import Critique, Curation, Draft, Evaluation, Finding, Pick, Plan, ScoutOutput, TaskSpec
+from app.schemas import Critique, Curation, Draft, Evaluation, Finding, MissingProjectCheck, Pick, Plan, ScoutOutput, TaskSpec
 
 
 def days_ago(n: int) -> str:
@@ -91,7 +91,9 @@ class FakeGateway:
         self.n_tasks = n_tasks
         self.tokens = tokens
         self.calls: list[tuple[str, str]] = []  # (step, name)
+        self.instructions: list[tuple[str, str, str, str]] = []  # (step, name, instruction, user_text), same order as calls
         self.scout_script: dict[str, callable] = {}
+        self.recover_script: dict[str, "ScoutOutput"] = {}
         self.fail_scouts: set[str] = set()
         self.crash_on_scout: str | None = None
         self.crash_after_calls: int | None = None
@@ -99,6 +101,12 @@ class FakeGateway:
         self.plan_note = "Moved the crew toward questions after your comment."
         self.draft_text = "You asked a real question and the answer depends on who you want to reach.\n\nI made the tool and wanted to say so plainly. Nothing to reply to here."
         self.critic_ok = True
+        self.critic_problems = ["tone"]
+        # step "missing_project_check": exact comment text -> the fake model's answer. Unset text defaults to
+        # False (stays visible) — a test opts a comment into "the model recognizes this as missing-project" by
+        # adding it here, the same way a real model would, instead of relying on any text pattern.
+        self.missing_project_classifier: dict[str, bool] = {}
+        self.missing_project_check_crash: set[str] = set()  # comment texts where the classification call fails
         self.last_plan_user = ""
         self.curate_order: list[str] | None = None
         self.step_cost_calls = {"plan": 1}
@@ -110,6 +118,7 @@ class FakeGateway:
 
     async def run_agent(self, *, step, tier, name, instruction, user_text, tools=None, output_schema=None, deadline_s=None, thinking="LOW", max_model_calls=12):
         self.calls.append((step, name))
+        self.instructions.append((step, name, instruction, user_text))
         if self.crash_after_calls is not None and len(self.calls) > self.crash_after_calls:
             raise SimulatedCrash()
         self._book(step, tier, len(instruction) + len(user_text))
@@ -124,6 +133,8 @@ class FakeGateway:
             by_name = {fn.__name__: fn for fn in (tools or [])}
             script = self.scout_script.get(name) or self._default_scout
             return AgentResult(parsed=await script(by_name, name))
+        if step == "scout_recover":
+            return AgentResult(parsed=self.recover_script.get(name) or ScoutOutput(findings=[], nothing_found_because="nothing worth keeping"))
         if step == "evaluate":
             tid = name.removeprefix("judge_")
             return AgentResult(parsed=self.eval_script.get(tid) or Evaluation(score=8, verdict="keep", reason="Good finds.", new_instruction=None))
@@ -133,7 +144,11 @@ class FakeGateway:
         if step == "write":
             return AgentResult(parsed=Draft(text=self.draft_text))
         if step == "critic":
-            return AgentResult(parsed=Critique(ok=self.critic_ok, problems=[] if self.critic_ok else ["tone"]))
+            return AgentResult(parsed=Critique(ok=self.critic_ok, problems=[] if self.critic_ok else list(self.critic_problems)))
+        if step == "missing_project_check":
+            if user_text in self.missing_project_check_crash:
+                raise CallFailed("timeout", "scripted")
+            return AgentResult(parsed=MissingProjectCheck(only_missing_project=self.missing_project_classifier.get(user_text, False)))
         if step == "search":
             return AgentResult(text="", grounding=[])
         raise AssertionError(f"unexpected step {step}")
