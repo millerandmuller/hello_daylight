@@ -638,6 +638,7 @@ class NightRun:
         except CallFailed:
             self.notes.add("curation fell back to the best-scored findings")
         picks = list(dict.fromkeys(picks))
+        self.S["curated"] = curated  # kept in the checkpoint: the headline may only speak for the curator's own choice
         picks = self._enforce_picks(picks, items, c.max_cards, fill=not curated)
         self.S["picks"] = [by_id[i] for i in picks]
         await self._checkpoint()
@@ -655,8 +656,9 @@ class NightRun:
 
     @staticmethod
     def _enforce_picks(picks: list[str], items: list[dict], n: int, fill: bool = True) -> list[str]:
-        """Code has the last word: at most n, no author or page twice, at least one resonance if one exists among the
-        candidates. fill=False (the curator answered): only its relevant picks are candidates, nothing is topped up."""
+        """Code has the last word: at most n, no author or page twice. No writer is forced onto the table: the curator may
+        leave that slot empty. fill=False (the curator answered): only its relevant picks are candidates, nothing is
+        topped up."""
         by_id = {i["item_id"]: i for i in items}
         chosen, authors, urls = [], set(), set()
 
@@ -675,12 +677,6 @@ class NightRun:
                 authors.add(it["author"].lower())
             if len(chosen) >= n:
                 break
-        if not any(by_id[i]["kind"] == "resonance" for i in chosen):
-            extra = next((by_id[i] for i in pool if by_id[i]["kind"] == "resonance" and ok(by_id[i])), None)
-            if extra:
-                if len(chosen) >= n:
-                    chosen.pop()
-                chosen.append(extra["item_id"])
         return chosen
 
     # ------------------------------------------------------------------------------------------
@@ -857,6 +853,11 @@ class NightRun:
             headline = self._shortfall_note()
         else:
             headline = ""
+        cards = self.S.get("cards", [])
+        writer_scout_missing = any(t["status"] == "missing" and t["spec"]["kind"] == "resonance" for t in self.S.get("tasks", {}).values())
+        # "No writer tonight." is the curator's decision; when a writer scout did not finish, nobody decided anything
+        if status in ("ok", "partial") and cards and self.S.get("curated", True) and not writer_scout_missing and not any(c["kind"] == "resonance" for c in cards):
+            headline = f"{headline} No writer tonight.".strip()
         cost_line = f"Cost of this run: {m['cost_eur']:.2f} EUR of {m['budget_eur']:.2f} EUR, {m['calls']} model calls."
         # A resumed run that failed before already booked part of its cost: this line books only the rest, so the
         # monthly sums count every euro once. cost_total_eur is what the whole run cost.

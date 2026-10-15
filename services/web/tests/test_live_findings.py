@@ -166,6 +166,66 @@ def test_enforce_picks_tops_up_only_when_the_curator_did_not_answer():
     items = [{"item_id": f"c{i}", "kind": "question", "author": "", "url": f"https://x.example/{i}"} for i in range(1, 8)]
     assert NightRun._enforce_picks(["c2"], items, 5, fill=False) == ["c2"]
     assert len(NightRun._enforce_picks(["c2"], items, 5, fill=True)) == 5
+    # no writer among the findings: the top-up still fills n questions and invents nothing
+    assert NightRun._enforce_picks([], items, 5, fill=True) == ["c1", "c2", "c3", "c4", "c5"]
+
+
+def test_enforce_picks_forces_no_writer_and_displaces_no_chosen_card():
+    items = [{"item_id": f"c{i}", "kind": "question", "author": "", "url": f"https://x.example/{i}"} for i in range(1, 6)]
+    items.append({"item_id": "c6", "kind": "resonance", "author": "Some Founder", "url": "https://x.example/6"})
+    assert NightRun._enforce_picks(["c1", "c2", "c3", "c4", "c5"], items, 5, fill=False) == ["c1", "c2", "c3", "c4", "c5"]
+    assert NightRun._enforce_picks(["c1", "c2", "c3"], items, 5, fill=False) == ["c1", "c2", "c3"]
+    assert NightRun._enforce_picks(["c1", "c6"], items, 5, fill=False) == ["c1", "c6"], "a writer the curator chose stays"
+
+
+def _curate_only(kind_tag: str, limit: int):
+    """The curator answers with the first `limit` findings whose listing line is tagged [kind_tag]."""
+    from app.schemas import Curation, Pick
+
+    from .fakes import AgentResult
+
+    def setup(gw):
+        original = gw.run_agent
+
+        async def run_agent(**kw):
+            if kw.get("step") == "curate":
+                ids = [l.split(" ", 1)[0] for l in kw["user_text"].splitlines() if l[:1] == "c" and f" [{kind_tag}] " in l]
+                gw.calls.append(("curate", "curator"))
+                return AgentResult(parsed=Curation(picks=[Pick(item_id=i, relevance=8, fit="fits") for i in ids[:limit]]))
+            return await original(**kw)
+
+        gw.run_agent = run_agent
+
+    return setup
+
+
+# --- The writer slot may stay empty -----------------------------------------------------------------
+def test_curator_picks_only_questions_and_the_headline_says_no_writer(repo, pid, world):
+    run(repo, pid, world, gw_setup=_curate_only("question", 3))
+    doc = last_run(repo, pid)
+    assert len(doc["cards"]) == 3 and not any(c["kind"] == "resonance" for c in doc["cards"])
+    assert doc["headline"].endswith("No writer tonight.")
+
+
+def test_every_question_the_curator_chose_stays_though_a_writer_exists(repo, pid, world):
+    run(repo, pid, world, gw_setup=_curate_only("question", 5))
+    doc = last_run(repo, pid)
+    assert len(doc["cards"]) == 4 and all(c["kind"] == "question" for c in doc["cards"]), "the world holds four questions: none is displaced"
+    assert doc["headline"].endswith("No writer tonight.")
+
+
+def test_a_chosen_writer_keeps_the_table_without_the_no_writer_line(repo, pid, world):
+    run(repo, pid, world, gw_setup=_curate_only("resonance", 2))
+    doc = last_run(repo, pid)
+    assert any(c["kind"] == "resonance" for c in doc["cards"])
+    assert "No writer tonight." not in doc["headline"]
+
+
+def test_the_curator_prompt_forces_no_writer_and_names_launch_posts():
+    from app import prompts
+
+    assert "At least one must be a 'resonance'" not in prompts.CURATE_INSTRUCTION
+    assert "launch post" in prompts.CURATE_INSTRUCTION and "may stay empty" in prompts.CURATE_INSTRUCTION
 
 
 # --- P3: access logs keep their shape ---------------------------------------------------------------
@@ -199,3 +259,38 @@ def test_a_paused_workspace_is_left_out_of_the_night_and_a_deleted_one_is_gone(r
 def test_logout_from_another_site_is_refused(client):
     r = client.post("/auth/logout", headers={"origin": "https://evil.example", "sec-fetch-site": "cross-site"}, follow_redirects=False)
     assert r.status_code == 403
+
+
+def test_no_writer_line_is_not_claimed_when_a_writer_scout_did_not_finish(repo, pid, world):
+    def setup(gw):
+        _curate_only("question", 3)(gw)
+        gw.fail_scouts.add("scout_t2")  # default_tasks: even positions are resonance scouts
+
+    run(repo, pid, world, gw_setup=setup)
+    doc = last_run(repo, pid)
+    assert not any(c["kind"] == "resonance" for c in doc["cards"])
+    assert "No writer tonight." not in doc["headline"] and "did not finish" in doc["headline"]
+
+
+def test_no_writer_line_is_not_claimed_when_the_curator_did_not_answer(repo, pid, world, monkeypatch):
+    from app.engine import CallFailed
+
+    def setup(gw):
+        original = gw.run_agent
+
+        async def run_agent(**kw):
+            if kw.get("step") == "curate":
+                gw.calls.append(("curate", "curator"))
+                raise CallFailed("timeout", "scripted")
+            return await original(**kw)
+
+        gw.run_agent = run_agent
+        gw.curate_order = None
+
+    real = NightRun._enforce_picks
+    # the fallback table holds no writer (what the best-scored findings happen to be): only then does the line matter
+    monkeypatch.setattr(NightRun, "_enforce_picks", staticmethod(lambda picks, items, n, fill=True: real(picks, [i for i in items if i["kind"] == "question"], n, fill)))
+    run(repo, pid, world, gw_setup=setup)
+    doc = last_run(repo, pid)
+    assert doc["cards"] and not any(c["kind"] == "resonance" for c in doc["cards"])
+    assert "No writer tonight." not in doc["headline"]

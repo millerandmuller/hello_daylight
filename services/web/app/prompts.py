@@ -85,7 +85,8 @@ CURATE_INSTRUCTION = """You are the curator. Choose the best {n} openings from t
 - Prefer fit with the goals, recency, and variety (different sources, different people). Each finding shows its age in days and,
   where the source reports it, its number of replies. At otherwise equal relevance, put the younger thread before the older one:
   a thread seven weeks old is technically a chance and practically dead.
-- At least one must be a 'resonance' opening if any resonance finding exists.
+- A writer card only for someone who actually writes about the topic. A launch post, a Show HN, a product announcement, or a
+  person who is themselves looking for users, testers or feedback is not a writer and not an opening. The writer slot may stay empty.
 - Never choose two findings by the same author or from the same page.
 - Rate each pick's relevance honestly. A post on another topic is off-topic even when a word matches. A person asking for
   the same thing the owner wants (also looking for testers, users or feedback) is not an opening for this owner.
