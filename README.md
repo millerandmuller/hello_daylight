@@ -64,6 +64,25 @@ Hard limits, all enforced in code and shown on the run page: 1.50 EUR per run (1
 - **Nobody is profiled.** One writer appears at most once in 30 days per workspace; a contact route is kept only if it stands literally on a page the scout read.
 - **No silent learning.** Your thumbs, comments and edits go to the next night, and the top of the desk says in one sentence what changed because of them.
 
+## What it stores, and what it never sees
+
+Checked against the code, not against intentions. The file names below are where to look.
+
+**Public mode (`/try`)**
+- Your Gemini key, your project, goals, results and feedback live in your browser's local storage (`app/static/public.js`). "Delete everything in this browser" removes all of it; "Delete key" removes the key alone.
+- A run sends the key once, over HTTPS, in a request header, for that run only. The server never writes it to a log, a file or the database.
+- The server keeps one line per public run in its ledger: time, model, calls, tokens, cost. No URL, no goals, no key, no address (`app/intake.py`, `intake_ledger_line`).
+
+**Signed-in workspaces (invite-only)**
+- Stored in Firestore: the project card and goals you confirmed, each night's run with its cards and plan, your thumbs and comments, the sent/replied state of the inbox, and the allowlist of addresses that may sign in (`app/repo_firestore.py`).
+- The session cookie proves who you are and nothing else; access is checked against the allowlist on every request, so removing someone takes effect at once (`app/auth.py`).
+- The operator's Gemini key, session secret and GitHub token live in Secret Manager, never in the repository or in Firestore.
+
+**Everyone**
+- Nothing leaves the service except GET requests to public pages and the one call that starts our own nightly job. Seven tests fail the build if a module imports a way to send mail or messages, if any outgoing request is not a GET, if a scout gets a write tool, or if the browser script posts a draft anywhere (`tests/test_no_outbound.py`).
+- Contact details are only ever shown as they stand on a public page; nothing is guessed or enriched (`docs/BOUNDARIES.md`).
+- Responses carry `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, so pages are not cached and links you open do not tell the other site where you came from.
+
 ## Layout
 
 ```
